@@ -3,6 +3,7 @@ from aiogram.filters import CommandStart
 from aiogram.types import CallbackQuery, Message
 
 from bot import keyboards
+from bot.db.session import session_maker
 from bot.services.users import register_user
 
 router = Router(name="start")
@@ -17,7 +18,7 @@ WELCOME = (
 async def cmd_start(message: Message) -> None:
     user = message.from_user
     if user is not None:
-        await register_user(user.id, user.username)
+        await register_user(session_maker, user.id, user.username)
     await message.answer(WELCOME, reply_markup=keyboards.main_menu())
 
 
