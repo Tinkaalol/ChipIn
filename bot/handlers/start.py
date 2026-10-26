@@ -1,5 +1,6 @@
 from aiogram import F, Router
 from aiogram.filters import CommandStart
+from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message
 
 from bot import keyboards
@@ -15,15 +16,14 @@ WELCOME = (
 
 
 @router.message(CommandStart())
-async def cmd_start(message: Message) -> None:
+async def cmd_start(message: Message, state: FSMContext) -> None:
+    await state.clear()
     user = message.from_user
     if user is not None:
         await register_user(session_maker, user.id, user.username)
     await message.answer(WELCOME, reply_markup=keyboards.main_menu())
 
 
-@router.callback_query(
-    F.data.in_({keyboards.FIND_GROUP, keyboards.CREATE_GROUP, keyboards.MY_GROUPS})
-)
+@router.callback_query(F.data.in_({keyboards.FIND_GROUP, keyboards.MY_GROUPS}))
 async def soon(callback: CallbackQuery) -> None:
     await callback.answer("Скоро", show_alert=False)

@@ -4,12 +4,13 @@ import logging
 from aiogram import Bot, Dispatcher
 
 from bot.config import get_settings
-from bot.handlers import start
+from bot.handlers import create_group, start
 
 
 def build_dispatcher() -> Dispatcher:
     dp = Dispatcher()
     dp.include_router(start.router)
+    dp.include_router(create_group.router)
     return dp
 
 
