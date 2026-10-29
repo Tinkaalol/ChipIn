@@ -1,4 +1,4 @@
-from decimal import ROUND_CEILING, Decimal, InvalidOperation
+from decimal import ROUND_CEILING, Decimal
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
@@ -6,7 +6,6 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from bot.db.models import Group, GroupStatus, Service
 
 MAX_OPEN_GROUPS = 3
-MAX_PRICE = Decimal("100000")
 BILLING_DAY_MIN = 1
 BILLING_DAY_MAX = 28
 CENT = Decimal("0.01")
@@ -20,28 +19,6 @@ class GroupError(Exception):
 
 class GroupLimitError(GroupError):
     pass
-
-
-def parse_int(text: str) -> int:
-    try:
-        return int(text.strip())
-    except ValueError:
-        raise GroupError("Нужно целое число, например 3.") from None
-
-
-def parse_price(text: str) -> Decimal:
-    raw = text.strip().replace(",", ".").replace("₽", "").strip()
-    try:
-        price = Decimal(raw)
-    except InvalidOperation:
-        raise GroupError("Не понял цену. Напишите число, например 299 или 299.50.") from None
-    if not price.is_finite() or price <= 0:
-        raise GroupError("Цена должна быть больше нуля.")
-    if price > MAX_PRICE:
-        raise GroupError(f"Слишком большая цена, максимум {MAX_PRICE:.0f}.")
-    if price != price.quantize(CENT):
-        raise GroupError("У цены не больше двух знаков после запятой.")
-    return price.quantize(CENT)
 
 
 def validate_slots_total(total: int, max_members: int) -> int:
@@ -120,7 +97,6 @@ async def create_group(
     session_maker: SessionMaker,
     owner_id: int,
     service_id: int,
-    price_month: Decimal,
     slots_total: int,
     slots_free: int,
     billing_day: int,
@@ -132,14 +108,12 @@ async def create_group(
         validate_slots_total(slots_total, service.max_members)
         validate_slots_free(slots_free, slots_total)
         validate_billing_day(billing_day)
-        if price_month <= 0 or price_month > MAX_PRICE:
-            raise GroupError("Некорректная цена.")
         if await _count_open_groups(session, owner_id) >= MAX_OPEN_GROUPS:
             raise _limit_error()
         group = Group(
             service_id=service_id,
             owner_id=owner_id,
-            price_per_member=calc_price_per_member(price_month, slots_total),
+            price_per_member=calc_price_per_member(service.price_month, slots_total),
             slots_total=slots_total,
             slots_free=slots_free,
             billing_day=billing_day,
@@ -148,3 +122,16 @@ async def create_group(
         session.add(group)
         await session.commit()
         return group
+
+
+async def list_owned_groups(
+    session_maker: SessionMaker, owner_id: int
+) -> list[tuple[Group, Service]]:
+    async with session_maker() as session:
+        stmt = (
+            select(Group, Service)
+            .join(Service, Group.service_id == Service.id)
+            .where(Group.owner_id == owner_id)
+            .order_by(Group.id.desc())
+        )
+        return [(g, s) for g, s in (await session.execute(stmt)).all()]

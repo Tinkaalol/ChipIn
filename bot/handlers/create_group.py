@@ -10,13 +10,14 @@ from bot import keyboards
 from bot.db.session import session_maker
 from bot.services import groups as svc
 from bot.services.users import register_user
+from bot.texts import WELCOME
 
 router = Router(name="create_group")
 
 
 class CreateGroup(StatesGroup):
     service = State()
-    price = State()
+    tariff = State()
     total = State()
     free = State()
     day = State()
@@ -26,7 +27,7 @@ class CreateGroup(StatesGroup):
 # Порядок шагов нужен для кнопки «Назад»
 STEPS: list[State] = [
     CreateGroup.service,
-    CreateGroup.price,
+    CreateGroup.tariff,
     CreateGroup.total,
     CreateGroup.free,
     CreateGroup.day,
@@ -34,6 +35,7 @@ STEPS: list[State] = [
 ]
 
 CURRENCY_SIGNS = {"RUB": "₽"}
+DAYS_PER_ROW = 7
 
 
 def money(amount: Decimal | str, currency: str) -> str:
@@ -44,29 +46,37 @@ async def _render(step: State, data: dict) -> tuple[str, InlineKeyboardMarkup]:
     """Текст и клавиатура для шага по данным из FSM."""
     if step == CreateGroup.service:
         services = await svc.list_active_services(session_maker)
-        items = [(s.id, f"{s.name} {s.plan_name}") for s in services]
+        if not services:
+            return "Каталог сервисов пока пуст.", keyboards.services_keyboard([])
+        items = [
+            (s.id, f"{s.name} {s.plan_name} · {money(s.price_month, s.currency)}") for s in services
+        ]
         return "Для какого сервиса создаём группу?", keyboards.services_keyboard(items)
     cur = data.get("currency", "RUB")
-    if step == CreateGroup.price:
-        label = f"Оставить {money(data['catalog_price'], cur)}"
+    if step == CreateGroup.tariff:
         text = (
-            f"{data['service_name']}, тариф «{data['plan_name']}».\n"
-            f"В каталоге цена в месяц: {money(data['catalog_price'], cur)}.\n"
-            "Оставьте её или напишите свою, например 349 или 349.50."
+            f"{data['service_name']}\n"
+            f"Тариф: {data['plan_name']}\n"
+            f"Цена в месяц: {money(data['price'], cur)}\n"
+            f"Максимум мест на подписке: {data['max_members']}\n\n"
+            "Тариф и цену задаёт сервис, изменить их нельзя."
         )
-        return text, keyboards.price_keyboard(label)
+        return text, keyboards.next_keyboard()
     if step == CreateGroup.total:
-        text = f"Сколько всего мест в группе, считая вас? От 2 до {data['max_members']}."
-        return text, keyboards.nav_keyboard()
-    if step == CreateGroup.free:
-        text = f"Сколько мест свободно? От 1 до {data['total'] - 1}: одно место занимаете вы."
-        return text, keyboards.nav_keyboard()
-    if step == CreateGroup.day:
-        text = (
-            f"Какого числа месяца оплата? От {svc.BILLING_DAY_MIN} до "
-            f"{svc.BILLING_DAY_MAX}, чтобы дата была в любом месяце."
+        text = "Сколько всего мест на подписке, считая вас?"
+        return text, keyboards.numbers_keyboard(
+            keyboards.CG_TOTAL, range(2, data["max_members"] + 1), per_row=3
         )
-        return text, keyboards.nav_keyboard()
+    if step == CreateGroup.free:
+        text = f"Сколько мест из {data['total']} свободно? Одно занимаете вы."
+        return text, keyboards.numbers_keyboard(
+            keyboards.CG_FREE, range(1, data["total"]), per_row=3
+        )
+    if step == CreateGroup.day:
+        text = "Какого числа месяца оплата?"
+        return text, keyboards.numbers_keyboard(
+            keyboards.CG_DAY, range(svc.BILLING_DAY_MIN, svc.BILLING_DAY_MAX + 1), DAYS_PER_ROW
+        )
     per_member = svc.calc_price_per_member(Decimal(data["price"]), data["total"])
     text = (
         "Проверьте группу:\n\n"
@@ -80,20 +90,23 @@ async def _render(step: State, data: dict) -> tuple[str, InlineKeyboardMarkup]:
     return text, keyboards.confirm_keyboard()
 
 
-async def _go(target: Message, state: FSMContext, step: State, *, edit: bool) -> None:
+async def _go(callback: CallbackQuery, state: FSMContext, step: State) -> None:
     await state.set_state(step)
     text, markup = await _render(step, await state.get_data())
-    if edit:
-        await target.edit_text(text, reply_markup=markup)
-    else:
-        await target.answer(text, reply_markup=markup)
+    if isinstance(callback.message, Message):
+        await callback.message.edit_text(text, reply_markup=markup)
+    await callback.answer()
 
 
-async def _finish(callback: CallbackQuery, state: FSMContext, text: str) -> None:
+async def _to_start(callback: CallbackQuery, state: FSMContext) -> None:
     await state.clear()
     if isinstance(callback.message, Message):
-        await callback.message.edit_text(text, reply_markup=keyboards.main_menu())
+        await callback.message.edit_text(WELCOME, reply_markup=keyboards.main_menu())
     await callback.answer()
+
+
+def _value(callback: CallbackQuery, prefix: str) -> int:
+    return int((callback.data or "").removeprefix(prefix))
 
 
 @router.callback_query(F.data == keyboards.CREATE_GROUP)
@@ -106,14 +119,12 @@ async def start_flow(callback: CallbackQuery, state: FSMContext) -> None:
         return
     await state.clear()
     await state.update_data(owner_id=user.id)
-    if isinstance(callback.message, Message):
-        await _go(callback.message, state, CreateGroup.service, edit=True)
-    await callback.answer()
+    await _go(callback, state, CreateGroup.service)
 
 
 @router.callback_query(F.data == keyboards.CG_CANCEL, StateFilter(*STEPS))
 async def cancel(callback: CallbackQuery, state: FSMContext) -> None:
-    await _finish(callback, state, "Создание группы отменено.")
+    await _to_start(callback, state)
 
 
 @router.callback_query(F.data == keyboards.CG_BACK, StateFilter(*STEPS))
@@ -121,17 +132,14 @@ async def back(callback: CallbackQuery, state: FSMContext) -> None:
     current = await state.get_state()
     index = next(i for i, s in enumerate(STEPS) if s.state == current)
     if index == 0:
-        await _finish(callback, state, "Главное меню.")
+        await _to_start(callback, state)
         return
-    if isinstance(callback.message, Message):
-        await _go(callback.message, state, STEPS[index - 1], edit=True)
-    await callback.answer()
+    await _go(callback, state, STEPS[index - 1])
 
 
 @router.callback_query(F.data.startswith(keyboards.CG_SERVICE), CreateGroup.service)
 async def pick_service(callback: CallbackQuery, state: FSMContext) -> None:
-    service_id = int((callback.data or "").removeprefix(keyboards.CG_SERVICE))
-    service = await svc.get_service(session_maker, service_id)
+    service = await svc.get_service(session_maker, _value(callback, keyboards.CG_SERVICE))
     if service is None or not service.is_active:
         await callback.answer("Этот сервис недоступен.", show_alert=True)
         return
@@ -139,68 +147,51 @@ async def pick_service(callback: CallbackQuery, state: FSMContext) -> None:
         service_id=service.id,
         service_name=service.name,
         plan_name=service.plan_name,
-        catalog_price=str(service.price_month),
+        price=str(service.price_month),
         currency=service.currency,
         max_members=service.max_members,
     )
-    if isinstance(callback.message, Message):
-        await _go(callback.message, state, CreateGroup.price, edit=True)
-    await callback.answer()
+    await _go(callback, state, CreateGroup.tariff)
 
 
-@router.callback_query(F.data == keyboards.CG_PRICE_DEFAULT, CreateGroup.price)
-async def default_price(callback: CallbackQuery, state: FSMContext) -> None:
-    data = await state.get_data()
-    await state.update_data(price=data["catalog_price"])
-    if isinstance(callback.message, Message):
-        await _go(callback.message, state, CreateGroup.total, edit=True)
-    await callback.answer()
+@router.callback_query(F.data == keyboards.CG_NEXT, CreateGroup.tariff)
+async def accept_tariff(callback: CallbackQuery, state: FSMContext) -> None:
+    await _go(callback, state, CreateGroup.total)
 
 
-@router.message(CreateGroup.price, F.text)
-async def input_price(message: Message, state: FSMContext) -> None:
-    try:
-        price = svc.parse_price(message.text or "")
-    except svc.GroupError as e:
-        await message.answer(str(e), reply_markup=keyboards.nav_keyboard())
-        return
-    await state.update_data(price=str(price))
-    await _go(message, state, CreateGroup.total, edit=False)
-
-
-@router.message(CreateGroup.total, F.text)
-async def input_total(message: Message, state: FSMContext) -> None:
+@router.callback_query(F.data.startswith(keyboards.CG_TOTAL), CreateGroup.total)
+async def pick_total(callback: CallbackQuery, state: FSMContext) -> None:
     data = await state.get_data()
     try:
-        total = svc.validate_slots_total(svc.parse_int(message.text or ""), data["max_members"])
+        total = svc.validate_slots_total(_value(callback, keyboards.CG_TOTAL), data["max_members"])
     except svc.GroupError as e:
-        await message.answer(str(e), reply_markup=keyboards.nav_keyboard())
+        await callback.answer(str(e), show_alert=True)
         return
     await state.update_data(total=total)
-    await _go(message, state, CreateGroup.free, edit=False)
+    await _go(callback, state, CreateGroup.free)
 
 
-@router.message(CreateGroup.free, F.text)
-async def input_free(message: Message, state: FSMContext) -> None:
+@router.callback_query(F.data.startswith(keyboards.CG_FREE), CreateGroup.free)
+async def pick_free(callback: CallbackQuery, state: FSMContext) -> None:
     data = await state.get_data()
     try:
-        free = svc.validate_slots_free(svc.parse_int(message.text or ""), data["total"])
+        free = svc.validate_slots_free(_value(callback, keyboards.CG_FREE), data["total"])
     except svc.GroupError as e:
-        await message.answer(str(e), reply_markup=keyboards.nav_keyboard())
+        await callback.answer(str(e), show_alert=True)
         return
     await state.update_data(free=free)
-    await _go(message, state, CreateGroup.day, edit=False)
+    await _go(callback, state, CreateGroup.day)
 
 
-@router.message(CreateGroup.day, F.text)
-async def input_day(message: Message, state: FSMContext) -> None:
+@router.callback_query(F.data.startswith(keyboards.CG_DAY), CreateGroup.day)
+async def pick_day(callback: CallbackQuery, state: FSMContext) -> None:
     try:
-        day = svc.validate_billing_day(svc.parse_int(message.text or ""))
+        day = svc.validate_billing_day(_value(callback, keyboards.CG_DAY))
     except svc.GroupError as e:
-        await message.answer(str(e), reply_markup=keyboards.nav_keyboard())
+        await callback.answer(str(e), show_alert=True)
         return
     await state.update_data(day=day)
-    await _go(message, state, CreateGroup.confirm, edit=False)
+    await _go(callback, state, CreateGroup.confirm)
 
 
 @router.callback_query(F.data == keyboards.CG_CONFIRM, CreateGroup.confirm)
@@ -211,17 +202,21 @@ async def confirm(callback: CallbackQuery, state: FSMContext) -> None:
             session_maker,
             owner_id=data["owner_id"],
             service_id=data["service_id"],
-            price_month=Decimal(data["price"]),
             slots_total=data["total"],
             slots_free=data["free"],
             billing_day=data["day"],
         )
     except svc.GroupError as e:
-        await _finish(callback, state, str(e))
+        await state.clear()
+        if isinstance(callback.message, Message):
+            await callback.message.edit_text(str(e), reply_markup=keyboards.main_menu())
+        await callback.answer()
         return
-    cur = data["currency"]
-    await _finish(
-        callback,
-        state,
-        f"Группа создана. С каждого участника {money(group.price_per_member, cur)} в месяц.",
+    await state.clear()
+    text = (
+        f"Группа создана. С каждого участника {money(group.price_per_member, data['currency'])} "
+        "в месяц. Она появилась в разделе «Мои группы»."
     )
+    if isinstance(callback.message, Message):
+        await callback.message.edit_text(text, reply_markup=keyboards.main_menu())
+    await callback.answer()

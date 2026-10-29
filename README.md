@@ -12,6 +12,14 @@ cp .env.example .env   # впишите BOT_TOKEN от @BotFather и свой Te
 python -m bot.main
 ```
 
+## Режим разработки
+
+```bash
+./dev.sh
+```
+
+Бот перезапускается при каждом изменении `.py` файлов в `bot/` и `migrations/`. Остановка — Ctrl+C.
+
 ## Проверки
 
 ```bash
