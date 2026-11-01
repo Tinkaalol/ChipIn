@@ -4,7 +4,7 @@ from aiogram import Bot, F, Router
 from aiogram.types import CallbackQuery
 
 from bot import keyboards, ui
-from bot.db.models import GroupStatus, MembershipStatus
+from bot.db.models import GroupStatus, MembershipStatus, User
 from bot.db.session import session_maker
 from bot.services import groups as groups_svc
 from bot.services import memberships as svc
@@ -19,6 +19,7 @@ CLOSE = "g:close:"
 CLOSE_OK = "g:closeok:"
 LEAVE = "g:leave:"
 LEAVE_OK = "g:leaveok:"
+REPORT = "r:new:"  # r:new:<group_id>:<user_id>
 APPLICATION_DECIDE_PREFIX = "m:"  # m:ok:<membership_id> / m:no:<membership_id>
 
 STATUS_LABELS = {
@@ -36,6 +37,10 @@ async def _current_user_id(callback: CallbackQuery) -> int:
 
 def _gid(callback: CallbackQuery, prefix: str) -> int:
     return int((callback.data or "").removeprefix(prefix))
+
+
+def _label(user: User) -> str:
+    return f"@{user.username}" if user.username else f"пользователя {user.telegram_id}"
 
 
 def _back_to_group(group_id: int) -> list[tuple[str, str]]:
@@ -66,7 +71,10 @@ async def show_my_groups(callback: CallbackQuery) -> None:
 
 @router.callback_query(F.data.startswith(VIEW))
 async def view_group(callback: CallbackQuery) -> None:
-    group_id = _gid(callback, VIEW)
+    await render_group(callback, _gid(callback, VIEW))
+
+
+async def render_group(callback: CallbackQuery, group_id: int) -> None:
     view = await svc.get_group_view(session_maker, group_id, await _current_user_id(callback))
     if view is None:
         await callback.answer("Эта группа недоступна.", show_alert=True)
@@ -93,7 +101,12 @@ async def view_group(callback: CallbackQuery) -> None:
         else:
             lines.append("Заявка на рассмотрении у организатора.")
             leave_text = "Отозвать заявку"
-        rows = [[(leave_text, f"{LEAVE}{g.id}")], HOME_ROW]
+        rows = [[(leave_text, f"{LEAVE}{g.id}")]]
+        if view.owner_contact is not None:
+            rows.append(
+                [("Пожаловаться на организатора", f"{REPORT}{g.id}:{view.owner_contact.id}")]
+            )
+        rows.append(HOME_ROW)
     await ui.show(callback, "\n".join(lines), keyboards.build(rows), html=True)
 
 
@@ -108,9 +121,12 @@ async def show_members(callback: CallbackQuery) -> None:
     if members:
         listing = "\n".join(f"• {contact_html(m.telegram_id, m.username)}" for m in members)
         text = f"Участники группы:\n{listing}"
+        rows = [[(f"Пожаловаться на {_label(m)}", f"{REPORT}{group_id}:{m.id}")] for m in members]
     else:
         text = "Пока нет принятых участников."
-    await ui.show(callback, text, keyboards.build([_back_to_group(group_id)]), html=True)
+        rows = []
+    rows.append(_back_to_group(group_id))
+    await ui.show(callback, text, keyboards.build(rows), html=True)
 
 
 @router.callback_query(F.data.startswith(CLOSE_OK))

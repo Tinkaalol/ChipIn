@@ -182,6 +182,27 @@ async def _take_slot(session: AsyncSession, group_id: int) -> None:
         raise GroupError("Свободных мест не осталось, заявку принять нельзя.")
 
 
+async def release_membership(session: AsyncSession, membership: Membership) -> Group:
+    """Помечает участие как LEFT; принятому участнику возвращает место в группе."""
+    was_approved = membership.status == MembershipStatus.APPROVED
+    result = await session.execute(
+        update(Membership)
+        .where(Membership.id == membership.id, Membership.status == membership.status)
+        .values(status=MembershipStatus.LEFT)
+    )
+    if result.rowcount == 0:
+        raise GroupError("Статус участия уже изменился, попробуйте ещё раз.")
+    group = await session.get(Group, membership.group_id)
+    if was_approved:
+        await session.execute(
+            update(Group).where(Group.id == group.id).values(slots_free=Group.slots_free + 1)
+        )
+        await session.refresh(group)
+        if group.status == GroupStatus.FULL:
+            group.status = GroupStatus.OPEN
+    return group  # type: ignore[return-value]
+
+
 async def leave_group(session_maker: SessionMaker, group_id: int, user_id: int) -> Departure:
     """Выход участника или отзыв заявки. Место возвращается, если участник был принят."""
     async with session_maker() as session, session.begin():
@@ -195,25 +216,28 @@ async def leave_group(session_maker: SessionMaker, group_id: int, user_id: int) 
         if membership is None:
             raise GroupError("Вы не состоите в этой группе.")
         was_approved = membership.status == MembershipStatus.APPROVED
-        result = await session.execute(
-            update(Membership)
-            .where(Membership.id == membership.id, Membership.status == membership.status)
-            .values(status=MembershipStatus.LEFT)
-        )
-        if result.rowcount == 0:
-            raise GroupError("Статус участия уже изменился, попробуйте ещё раз.")
-        group = await session.get(Group, group_id)
-        if was_approved:
-            await session.execute(
-                update(Group).where(Group.id == group_id).values(slots_free=Group.slots_free + 1)
-            )
-            await session.refresh(group)
-            if group.status == GroupStatus.FULL:
-                group.status = GroupStatus.OPEN
+        group = await release_membership(session, membership)
         user = await session.get(User, user_id)
         owner = await session.get(User, group.owner_id)
         service = await session.get(Service, group.service_id)
         return Departure(group, service, user, owner, was_approved)  # type: ignore[arg-type]
+
+
+async def close_in_session(session: AsyncSession, group: Group) -> list[int]:
+    """Закрывает группу, отклоняет ждущие заявки; возвращает telegram_id тех, кого уведомить."""
+    rows = await session.execute(
+        select(User.telegram_id)
+        .join(Membership, Membership.user_id == User.id)
+        .where(Membership.group_id == group.id, Membership.status.in_(ACTIVE))
+    )
+    notify_ids = [r[0] for r in rows]
+    await session.execute(
+        update(Membership)
+        .where(Membership.group_id == group.id, Membership.status == MembershipStatus.PENDING)
+        .values(status=MembershipStatus.REJECTED)
+    )
+    group.status = GroupStatus.CLOSED
+    return notify_ids
 
 
 async def close_group(session_maker: SessionMaker, group_id: int, owner_id: int) -> Closure:
@@ -223,18 +247,7 @@ async def close_group(session_maker: SessionMaker, group_id: int, owner_id: int)
             raise GroupError("Это не ваша группа.")
         if group.status == GroupStatus.CLOSED:
             raise GroupError("Группа уже закрыта.")
-        rows = await session.execute(
-            select(User.telegram_id)
-            .join(Membership, Membership.user_id == User.id)
-            .where(Membership.group_id == group_id, Membership.status.in_(ACTIVE))
-        )
-        notify_ids = [r[0] for r in rows]
-        await session.execute(
-            update(Membership)
-            .where(Membership.group_id == group_id, Membership.status == MembershipStatus.PENDING)
-            .values(status=MembershipStatus.REJECTED)
-        )
-        group.status = GroupStatus.CLOSED
+        notify_ids = await close_in_session(session, group)
         service = await session.get(Service, group.service_id)
         return Closure(group, service, notify_ids)  # type: ignore[arg-type]
 

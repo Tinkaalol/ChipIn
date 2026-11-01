@@ -6,6 +6,7 @@ from bot.db.session import session_maker
 from bot.handlers.my_groups import APPLICATION_DECIDE_PREFIX
 from bot.services import groups as groups_svc
 from bot.services import memberships as svc
+from bot.services.ratelimit import RATE_LIMIT_MESSAGE, application_limiter
 from bot.services.users import register_user
 from bot.texts import contact_html, money
 
@@ -88,6 +89,9 @@ async def show_card(callback: CallbackQuery) -> None:
 async def apply(callback: CallbackQuery, bot: Bot) -> None:
     group_id = int((callback.data or "").removeprefix(APPLY))
     user = await register_user(session_maker, callback.from_user.id, callback.from_user.username)
+    if not application_limiter.allow(user.id):
+        await callback.answer(RATE_LIMIT_MESSAGE, show_alert=True)
+        return
     try:
         app = await svc.apply_to_group(session_maker, group_id, user.id)
     except groups_svc.GroupError as e:

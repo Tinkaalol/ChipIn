@@ -9,6 +9,7 @@ from aiogram.types import CallbackQuery, InlineKeyboardMarkup, Message
 from bot import keyboards
 from bot.db.session import session_maker
 from bot.services import groups as svc
+from bot.services.ratelimit import RATE_LIMIT_MESSAGE, group_limiter
 from bot.services.users import register_user
 from bot.texts import WELCOME, money
 
@@ -192,6 +193,9 @@ async def pick_day(callback: CallbackQuery, state: FSMContext) -> None:
 @router.callback_query(F.data == keyboards.CG_CONFIRM, CreateGroup.confirm)
 async def confirm(callback: CallbackQuery, state: FSMContext) -> None:
     data = await state.get_data()
+    if not group_limiter.allow(data["owner_id"]):
+        await callback.answer(RATE_LIMIT_MESSAGE, show_alert=True)
+        return
     try:
         group = await svc.create_group(
             session_maker,
