@@ -8,7 +8,7 @@ from alembic.config import Config
 
 from bot.config import get_settings
 from bot.db.session import session_maker
-from bot.handlers import create_group, errors, my_groups, start
+from bot.handlers import create_group, errors, my_groups, search, start
 from bot.health import start_health_server
 from bot.services.catalog import seed_services
 
@@ -18,6 +18,7 @@ def build_dispatcher() -> Dispatcher:
     dp.include_router(start.router)
     dp.include_router(create_group.router)
     dp.include_router(my_groups.router)
+    dp.include_router(search.router)
     dp.include_router(errors.router)
     return dp
 

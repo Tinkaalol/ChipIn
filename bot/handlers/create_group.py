@@ -10,7 +10,7 @@ from bot import keyboards
 from bot.db.session import session_maker
 from bot.services import groups as svc
 from bot.services.users import register_user
-from bot.texts import WELCOME
+from bot.texts import WELCOME, money
 
 router = Router(name="create_group")
 
@@ -34,12 +34,7 @@ STEPS: list[State] = [
     CreateGroup.confirm,
 ]
 
-CURRENCY_SIGNS = {"RUB": "₽"}
 DAYS_PER_ROW = 7
-
-
-def money(amount: Decimal | str, currency: str) -> str:
-    return f"{Decimal(amount):.2f} {CURRENCY_SIGNS.get(currency, currency)}"
 
 
 async def _render(step: State, data: dict) -> tuple[str, InlineKeyboardMarkup]:

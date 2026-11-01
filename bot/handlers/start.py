@@ -29,8 +29,3 @@ async def go_home(callback: CallbackQuery, state: FSMContext) -> None:
     if isinstance(callback.message, Message):
         await callback.message.edit_text(WELCOME, reply_markup=keyboards.main_menu())
     await callback.answer()
-
-
-@router.callback_query(F.data == keyboards.FIND_GROUP)
-async def soon(callback: CallbackQuery) -> None:
-    await callback.answer("Скоро", show_alert=False)

@@ -71,3 +71,13 @@ def confirm_keyboard() -> InlineKeyboardMarkup:
     builder.button(text="Создать группу", callback_data=CG_CONFIRM)
     _nav_row(builder)
     return builder.as_markup()
+
+
+def build(rows: list[list[tuple[str, str]]]) -> InlineKeyboardMarkup:
+    """Клавиатура из строк пар (текст, callback_data)."""
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text=text, callback_data=data) for text, data in row]
+            for row in rows
+        ]
+    )
