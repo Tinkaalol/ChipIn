@@ -1,37 +1,15 @@
 import pytest
-from aiogram import Dispatcher
 from sqlalchemy import select
 
 from bot.db.models import Report, ReportStatus, Service, User
-from bot.handlers import admin, create_group, errors, my_groups, report, search, start
-from bot.main import build_dispatcher
 from bot.services import catalog
 from bot.services import moderation as mod
 from bot.services.ratelimit import RateLimiter
+from tests.conftest import ADMIN_ID
 from tests.fakes import callback_update, make_bot, message_update
 from tests.test_memberships import make_world
 
-ADMIN_ID = 777
 STRANGER_ID = 888
-
-
-@pytest.fixture
-def dp(session_maker, monkeypatch) -> Dispatcher:
-    for module in (
-        "bot.handlers.admin",
-        "bot.handlers.start",
-        "bot.handlers.report",
-        "bot.handlers.my_groups",
-    ):
-        monkeypatch.setattr(f"{module}.session_maker", session_maker)
-    monkeypatch.setattr("bot.handlers.admin.admin_ids", lambda: {ADMIN_ID})
-    monkeypatch.setattr(
-        "bot.handlers.report.get_settings", lambda: type("S", (), {"admin_ids": [ADMIN_ID]})()
-    )
-    # Роутеры модульные, поэтому перед новой сборкой диспетчера отцепляем их от старого
-    for module in (admin, create_group, errors, my_groups, report, search, start):
-        module.router._parent_router = None
-    return build_dispatcher(session_maker)
 
 
 async def test_admin_commands_ignored_for_non_admin(dp, session_maker) -> None:

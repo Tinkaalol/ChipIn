@@ -1,3 +1,5 @@
+from html import escape
+
 from aiogram import Bot, F, Router
 from aiogram.types import CallbackQuery
 
@@ -99,10 +101,10 @@ async def apply(callback: CallbackQuery, bot: Bot) -> None:
         return
     decide = APPLICATION_DECIDE_PREFIX
     applicant = contact_html(app.applicant.telegram_id, app.applicant.username)
-    await ui.notify(
+    delivered = await ui.notify(
         bot,
         app.owner.telegram_id,
-        f"Новая заявка в группу {app.service.name} {app.service.plan_name}\n"
+        f"Новая заявка в группу {escape(app.service.name)} {escape(app.service.plan_name)}\n"
         f"От: {applicant}\n"
         f"Свободных мест: {app.group.slots_free}",
         keyboards.build(
@@ -115,8 +117,14 @@ async def apply(callback: CallbackQuery, bot: Bot) -> None:
         ),
         html=True,
     )
+    text = "Заявка отправлена организатору. Я напишу, когда он ответит."
+    if not delivered:
+        text = (
+            "Заявка сохранена, но организатор пока не получил уведомление "
+            "(возможно, он остановил бота). Она появится у него, когда он вернётся."
+        )
     await ui.show(
         callback,
-        "Заявка отправлена организатору. Я напишу, когда он ответит.",
+        text,
         keyboards.build([[("В главное меню", keyboards.HOME)]]),
     )

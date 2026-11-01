@@ -14,6 +14,9 @@ class RateLimiter:
         self._clock = clock
         self._events: dict[int, deque[float]] = defaultdict(deque)
 
+    def clear(self) -> None:
+        self._events.clear()
+
     def allow(self, key: int) -> bool:
         """Фиксирует событие и возвращает True, если лимит не превышен."""
         now = self._clock()

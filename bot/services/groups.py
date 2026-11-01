@@ -1,9 +1,11 @@
+import asyncio
+from collections import defaultdict
 from decimal import ROUND_CEILING, Decimal
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from bot.db.models import Group, GroupStatus, Service
+from bot.db.models import Group, GroupStatus, Service, User
 
 MAX_OPEN_GROUPS = 3
 BILLING_DAY_MIN = 1
@@ -11,6 +13,11 @@ BILLING_DAY_MAX = 28
 CENT = Decimal("0.01")
 
 SessionMaker = async_sessionmaker[AsyncSession]
+
+
+# Создание групп одного владельца идёт по очереди: проверка лимита и вставка не должны
+# перемешиваться между параллельными запросами (в PostgreSQL дополнительно FOR UPDATE).
+_owner_locks: defaultdict[int, asyncio.Lock] = defaultdict(asyncio.Lock)
 
 
 class GroupError(Exception):
@@ -101,10 +108,13 @@ async def create_group(
     slots_free: int,
     billing_day: int,
 ) -> Group:
-    async with session_maker() as session:
+    async with _owner_locks[owner_id], session_maker() as session:
         service = await session.get(Service, service_id)
         if service is None or not service.is_active:
             raise GroupError("Этот сервис больше недоступен.")
+        # Блокируем строку владельца (на PostgreSQL), чтобы параллельные создания
+        # не обошли лимит открытых групп
+        await session.get(User, owner_id, with_for_update=True)
         validate_slots_total(slots_total, service.max_members)
         validate_slots_free(slots_free, slots_total)
         validate_billing_day(billing_day)

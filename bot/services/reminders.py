@@ -3,6 +3,7 @@ import logging
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta, timezone
 from enum import StrEnum
+from html import escape
 
 from aiogram import Bot
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
@@ -102,7 +103,7 @@ def _when(kind: ReminderKind) -> str:
 def member_text(d: _Due) -> str:
     owner = contact_html(d.owner.telegram_id, d.owner.username)
     return (
-        f"{_when(d.kind)} оплата подписки {d.service.name} {d.service.plan_name}.\n"
+        f"{_when(d.kind)} оплата подписки {escape(d.service.name)} {escape(d.service.plan_name)}.\n"
         f"Ваш взнос: {money(d.group.price_per_member, d.service.currency)}.\n"
         f"Переведите его организатору: {owner}."
     )
@@ -110,7 +111,7 @@ def member_text(d: _Due) -> str:
 
 def owner_text(d: _Due) -> str:
     return (
-        f"{_when(d.kind)} оплата подписки {d.service.name} {d.service.plan_name}.\n"
+        f"{_when(d.kind)} оплата подписки {escape(d.service.name)} {escape(d.service.plan_name)}.\n"
         f"Участники (их {len(d.members)}) переведут вам по "
         f"{money(d.group.price_per_member, d.service.currency)}."
     )

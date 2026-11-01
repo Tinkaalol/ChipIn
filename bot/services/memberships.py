@@ -2,6 +2,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 
 from sqlalchemy import func, select, update
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot.db.models import Group, GroupStatus, Membership, MembershipStatus, Service, User
@@ -129,7 +130,11 @@ async def apply_to_group(
             )
         membership = Membership(group_id=group_id, user_id=applicant_id)
         session.add(membership)
-        await session.flush()
+        try:
+            await session.flush()
+        except IntegrityError:
+            # Параллельный двойной клик: уникальный индекс не дал создать вторую заявку
+            raise GroupError("Вы уже подали заявку, ждите ответа организатора.") from None
         owner = await session.get(User, group.owner_id)
         service = await session.get(Service, group.service_id)
         return Application(membership, group, service, applicant, owner)  # type: ignore[arg-type]
@@ -195,7 +200,9 @@ async def release_membership(session: AsyncSession, membership: Membership) -> G
     group = await session.get(Group, membership.group_id)
     if was_approved:
         await session.execute(
-            update(Group).where(Group.id == group.id).values(slots_free=Group.slots_free + 1)
+            update(Group)
+            .where(Group.id == group.id, Group.slots_free < Group.slots_total - 1)
+            .values(slots_free=Group.slots_free + 1)
         )
         await session.refresh(group)
         if group.status == GroupStatus.FULL:

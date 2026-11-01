@@ -81,7 +81,7 @@ async def render_group(callback: CallbackQuery, group_id: int) -> None:
         return
     g, s = view.group, view.service
     lines = [
-        f"{s.name} {s.plan_name} — {STATUS_LABELS[g.status]}",
+        f"{escape(s.name)} {escape(s.plan_name)} — {STATUS_LABELS[g.status]}",
         f"Свободно мест: {g.slots_free} из {g.slots_total}",
         f"С участника: {money(g.price_per_member, s.currency)} в месяц",
         f"Оплата: {g.billing_day}-го числа",
@@ -166,9 +166,9 @@ async def leave_confirmed(callback: CallbackQuery, bot: Bot) -> None:
     title = f"{dep.service.name} {dep.service.plan_name}"
     who = contact_html(dep.user.telegram_id, dep.user.username)
     if dep.was_approved:
-        owner_text = f"Участник {who} вышел из группы {title}. Место снова свободно."
+        owner_text = f"Участник {who} вышел из группы {escape(title)}. Место снова свободно."
     else:
-        owner_text = f"{who} отозвал заявку в группу {title}."
+        owner_text = f"{who} отозвал заявку в группу {escape(title)}."
     await ui.notify(bot, dep.owner.telegram_id, owner_text, html=True)
     await ui.show(
         callback,
@@ -198,7 +198,7 @@ async def decide_application(callback: CallbackQuery, bot: Bot) -> None:
     title = f"{d.service.name} {d.service.plan_name}"
     if approve:
         owner_contact = contact_html(d.owner.telegram_id, d.owner.username)
-        await ui.notify(
+        delivered = await ui.notify(
             bot,
             d.member.telegram_id,
             f"Ваша заявка в группу {escape(title)} принята.\n"
@@ -209,6 +209,8 @@ async def decide_application(callback: CallbackQuery, bot: Bot) -> None:
             html=True,
         )
         verdict = "✅ Принята"
+        if not delivered:
+            verdict += "\nНе удалось уведомить участника, свяжитесь с ним сами."
         if d.group.status == GroupStatus.FULL:
             verdict += "\nВсе места заняты, набор закрыт."
     else:

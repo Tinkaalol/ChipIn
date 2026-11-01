@@ -7,7 +7,7 @@ from alembic import command
 from alembic.config import Config
 
 from bot.config import get_settings
-from bot.db.session import session_maker
+from bot.db.session import engine, session_maker
 from bot.handlers import admin, create_group, errors, my_groups, report, search, start
 from bot.health import start_health_server
 from bot.middlewares import BanMiddleware
@@ -56,6 +56,7 @@ async def main() -> None:
         scheduler.shutdown(wait=False)
         if health is not None:
             await health.cleanup()
+        await engine.dispose()
 
 
 if __name__ == "__main__":

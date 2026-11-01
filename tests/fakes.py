@@ -2,6 +2,7 @@ import datetime
 
 from aiogram import Bot
 from aiogram.client.session.base import BaseSession
+from aiogram.exceptions import TelegramForbiddenError
 from aiogram.methods import EditMessageText, SendMessage
 from aiogram.types import CallbackQuery, Chat, Message, MessageEntity, Update, User
 
@@ -9,9 +10,10 @@ from aiogram.types import CallbackQuery, Chat, Message, MessageEntity, Update, U
 class FakeSession(BaseSession):
     """Сессия бота без сети: запоминает отправленные методы."""
 
-    def __init__(self) -> None:
+    def __init__(self, blocked_chats: set[int] | None = None) -> None:
         super().__init__()
         self.calls: list = []
+        self.blocked_chats = blocked_chats or set()
 
     async def close(self) -> None:
         pass
@@ -21,6 +23,8 @@ class FakeSession(BaseSession):
 
     async def make_request(self, bot, method, timeout=None):
         self.calls.append(method)
+        if isinstance(method, SendMessage) and method.chat_id in self.blocked_chats:
+            raise TelegramForbiddenError(method=method, message="Forbidden: bot was blocked")
         if isinstance(method, SendMessage | EditMessageText):
             return Message(
                 message_id=1,
@@ -29,6 +33,13 @@ class FakeSession(BaseSession):
                 text=method.text,
             ).as_(bot)
         return True
+
+    def texts_to(self, chat_id: int) -> list[str]:
+        return [
+            m.text
+            for m in self.calls
+            if isinstance(m, SendMessage | EditMessageText) and m.chat_id == chat_id
+        ]
 
     def texts(self) -> list[str]:
         return [m.text for m in self.calls if isinstance(m, SendMessage | EditMessageText)]
@@ -41,8 +52,8 @@ class FakeSession(BaseSession):
         ]
 
 
-def make_bot() -> tuple[Bot, FakeSession]:
-    session = FakeSession()
+def make_bot(blocked_chats: set[int] | None = None) -> tuple[Bot, FakeSession]:
+    session = FakeSession(blocked_chats)
     return Bot("1:TEST", session=session), session
 
 

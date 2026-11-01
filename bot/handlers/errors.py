@@ -1,7 +1,8 @@
 import logging
+from contextlib import suppress
 
 from aiogram import Router
-from aiogram.exceptions import TelegramBadRequest
+from aiogram.exceptions import TelegramAPIError, TelegramBadRequest
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, ErrorEvent, Message
 
@@ -21,6 +22,11 @@ async def on_error(event: ErrorEvent) -> bool:
     if isinstance(exc, TelegramBadRequest) and any(h in str(exc).lower() for h in HARMLESS):
         return True
     logger.exception("Ошибка при обработке обновления", exc_info=exc)
+    callback = event.update.callback_query
+    if callback is not None:
+        # Пользователь не должен висеть на «часиках» после сбоя
+        with suppress(TelegramAPIError):
+            await callback.answer("Что-то пошло не так, попробуйте ещё раз.", show_alert=True)
     return True
 
 

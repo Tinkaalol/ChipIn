@@ -2,7 +2,18 @@ import enum
 from datetime import UTC, date, datetime
 from decimal import Decimal
 
-from sqlalchemy import BigInteger, Date, DateTime, Enum, ForeignKey, Numeric, String, Text
+from sqlalchemy import (
+    BigInteger,
+    Date,
+    DateTime,
+    Enum,
+    ForeignKey,
+    Index,
+    Numeric,
+    String,
+    Text,
+    text,
+)
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 
@@ -57,6 +68,7 @@ class User(Base):
 
 class Service(Base):
     __tablename__ = "services"
+    __table_args__ = (Index("uq_services_name_plan", "name", "plan_name", unique=True),)
 
     id: Mapped[int] = mapped_column(primary_key=True)
     name: Mapped[str] = mapped_column(String(64))
@@ -85,6 +97,17 @@ class Group(Base):
 
 class Membership(Base):
     __tablename__ = "memberships"
+    # Один человек не может иметь две живые заявки/участия в группе (защита от двойного клика)
+    __table_args__ = (
+        Index(
+            "uq_memberships_active",
+            "group_id",
+            "user_id",
+            unique=True,
+            sqlite_where=text("status IN ('pending', 'approved')"),
+            postgresql_where=text("status IN ('pending', 'approved')"),
+        ),
+    )
 
     id: Mapped[int] = mapped_column(primary_key=True)
     group_id: Mapped[int] = mapped_column(ForeignKey("groups.id"), index=True)
