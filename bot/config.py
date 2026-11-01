@@ -12,6 +12,15 @@ class Settings(BaseSettings):
     database_url: str = "sqlite+aiosqlite:///./bot.db"
     admin_ids: Annotated[list[int], NoDecode] = []
 
+    @field_validator("database_url")
+    @classmethod
+    def _async_driver(cls, value: str) -> str:
+        # Render отдаёт postgres:// или postgresql://, а SQLAlchemy async нужен драйвер asyncpg
+        for prefix in ("postgres://", "postgresql://"):
+            if value.startswith(prefix):
+                return "postgresql+asyncpg://" + value.removeprefix(prefix)
+        return value
+
     @field_validator("admin_ids", mode="before")
     @classmethod
     def _split_ids(cls, value: object) -> object:

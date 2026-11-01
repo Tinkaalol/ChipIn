@@ -12,6 +12,14 @@ cp .env.example .env   # впишите BOT_TOKEN от @BotFather и свой Te
 python -m bot.main
 ```
 
+## Деплой на Render
+
+Лучше всего подходит тип **Background Worker** (порт не нужен), команда запуска `python -m bot.main`.
+Если сервис создан как Web Service, бот сам откроет порт из `$PORT` (отвечает `ok` на `/`).
+Проще всего: New → Blueprint, указать репозиторий, [render.yaml](render.yaml) создаст воркер и базу PostgreSQL.
+Осталось вписать `BOT_TOKEN` и `ADMIN_IDS`. Диск Render не постоянный, поэтому для групп нужна PostgreSQL. Адреса `postgres://` бот сам превращает в `postgresql+asyncpg://`.
+Бесплатная база Render удаляется через 30 дней, для постоянной работы возьмите платный тариф.
+
 ## Режим разработки
 
 ```bash

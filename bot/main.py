@@ -9,6 +9,7 @@ from alembic.config import Config
 from bot.config import get_settings
 from bot.db.session import session_maker
 from bot.handlers import create_group, errors, my_groups, start
+from bot.health import start_health_server
 from bot.services.catalog import seed_services
 
 
@@ -40,7 +41,12 @@ async def main() -> None:
     bot = Bot(token=settings.bot_token)
     dp = build_dispatcher()
     logging.getLogger(__name__).info("Бот запущен (long polling)")
-    await dp.start_polling(bot)
+    health = await start_health_server()
+    try:
+        await dp.start_polling(bot)
+    finally:
+        if health is not None:
+            await health.cleanup()
 
 
 if __name__ == "__main__":
