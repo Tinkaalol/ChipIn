@@ -1,15 +1,17 @@
 from decimal import Decimal
 from html import escape
 
+from bot.db.models import DEFAULT_CURRENCY
+
 WELCOME = (
     "Привет! Я помогу найти компанию для совместной оплаты подписок.\n"
     "Деньги я не принимаю: участники переводят их друг другу сами."
 )
 
-CURRENCY_SIGNS = {"RUB": "₽"}
+CURRENCY_SIGNS = {"KZT": "₸"}
 
 
-def money(amount: Decimal | str, currency: str = "RUB") -> str:
+def money(amount: Decimal | str, currency: str = DEFAULT_CURRENCY) -> str:
     return f"{Decimal(amount):.2f} {CURRENCY_SIGNS.get(currency, currency)}"
 
 

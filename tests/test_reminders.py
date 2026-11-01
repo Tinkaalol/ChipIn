@@ -114,7 +114,7 @@ async def test_reminds_owner_and_approved_members_with_amount(session_maker) -> 
     assert {chat for chat, _ in bot.sent} == {1, 10, 11}
     assert all(text.startswith("Завтра") for _, text in bot.sent)
     member_text = next(t for c, t in bot.sent if c == 10)
-    assert "100.00 ₽" in member_text and "@owner" in member_text
+    assert "100.00 ₸" in member_text and "@owner" in member_text
 
 
 async def test_today_reminder_text(session_maker) -> None:

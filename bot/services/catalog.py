@@ -5,12 +5,12 @@ from sqlalchemy import select
 from bot.db.models import Service
 from bot.services.groups import GroupError, SessionMaker
 
-# ЦЕНЫ ПРИМЕРНЫЕ (руб./мес. за весь тариф), перед запуском в прод сверить с сайтами сервисов.
+# ЦЕНЫ ПРИМЕРНЫЕ (тенге в месяц за весь тариф), перед запуском в прод сверить с сайтами сервисов.
 SERVICES: list[tuple[str, str, str, int]] = [
-    ("Spotify", "Family", "299", 6),
-    ("YouTube Premium", "Family", "399", 5),
-    ("ChatGPT", "Plus", "2000", 2),
-    ("Яндекс Плюс", "Мульти", "399", 4),
+    ("Spotify", "Family", "2800", 6),
+    ("YouTube Premium", "Family", "3500", 5),
+    ("ChatGPT", "Plus", "10000", 2),
+    ("Яндекс Плюс", "Мульти", "2000", 4),
 ]
 
 
@@ -36,14 +36,14 @@ async def seed_services(session_maker: SessionMaker) -> int:
     return added
 
 
-MAX_PRICE = Decimal("100000")
+MAX_PRICE = Decimal("1000000")
 MAX_MEMBERS_LIMIT = 20
 CENT = Decimal("0.01")
 
 
 def parse_price(text: str) -> Decimal:
     try:
-        price = Decimal(text.strip().replace(",", ".").replace("₽", "").strip())
+        price = Decimal(text.strip().replace(",", ".").replace("₸", "").strip())
     except InvalidOperation:
         raise GroupError("Не понял цену. Напишите число, например 299 или 299.50.") from None
     if not price.is_finite() or price <= 0 or price > MAX_PRICE:

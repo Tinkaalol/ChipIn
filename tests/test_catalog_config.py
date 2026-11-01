@@ -43,7 +43,7 @@ async def test_add_service_validation(session_maker) -> None:
     await catalog.add_service(session_maker, "A", "B", price, 20)
 
 
-@pytest.mark.parametrize("raw", ["0", "100000.01", "1.999", "nan", "inf", "", "1e3x"])
+@pytest.mark.parametrize("raw", ["0", "1000000.01", "1.999", "nan", "inf", "", "1e3x"])
 def test_parse_price_rejects(raw: str) -> None:
     with pytest.raises(GroupError):
         catalog.parse_price(raw)

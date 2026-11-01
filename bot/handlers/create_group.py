@@ -7,6 +7,7 @@ from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import CallbackQuery, InlineKeyboardMarkup, Message
 
 from bot import keyboards
+from bot.db.models import DEFAULT_CURRENCY
 from bot.db.session import session_maker
 from bot.services import groups as svc
 from bot.services.ratelimit import RATE_LIMIT_MESSAGE, group_limiter
@@ -48,7 +49,7 @@ async def _render(step: State, data: dict) -> tuple[str, InlineKeyboardMarkup]:
             (s.id, f"{s.name} {s.plan_name} · {money(s.price_month, s.currency)}") for s in services
         ]
         return "Для какого сервиса создаём группу?", keyboards.services_keyboard(items)
-    cur = data.get("currency", "RUB")
+    cur = data.get("currency", DEFAULT_CURRENCY)
     if step == CreateGroup.tariff:
         text = (
             f"{data['service_name']}\n"

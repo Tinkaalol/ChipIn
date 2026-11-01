@@ -16,6 +16,8 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
+DEFAULT_CURRENCY = "KZT"  # все подписки считаются в тенге
+
 
 def _now() -> datetime:
     return datetime.now(UTC)
@@ -74,7 +76,7 @@ class Service(Base):
     name: Mapped[str] = mapped_column(String(64))
     plan_name: Mapped[str] = mapped_column(String(64))
     price_month: Mapped[Decimal] = mapped_column(Numeric(10, 2))
-    currency: Mapped[str] = mapped_column(String(3), default="RUB")
+    currency: Mapped[str] = mapped_column(String(3), default=DEFAULT_CURRENCY)
     max_members: Mapped[int]
     is_active: Mapped[bool] = mapped_column(default=True)
 

@@ -35,7 +35,7 @@ async def test_create_group_flow_saves_group(dp, session_maker) -> None:
     bot, _ = make_bot()
     group = await create_group_via_bot(dp, bot, session_maker)
     assert (group.slots_total, group.slots_free, group.billing_day) == (3, 2, 7)
-    assert str(group.price_per_member) == "99.67"  # 299 / 3, округление вверх
+    assert str(group.price_per_member) == "933.34"  # 2800 / 3, округление вверх
 
 
 async def test_create_group_back_and_cancel(dp, session_maker) -> None:
