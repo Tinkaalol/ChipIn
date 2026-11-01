@@ -6,8 +6,9 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot.db.models import Group, GroupStatus, Membership, MembershipStatus, Service, User
-from bot.services.groups import GroupError, SessionMaker
+from bot.services.groups import GroupError, Role, SessionMaker, role_in_session
 
+MAX_SHOWN_APPLICANTS = 10
 ACTIVE = (MembershipStatus.PENDING, MembershipStatus.APPROVED)
 
 
@@ -55,23 +56,21 @@ class GroupEntry:
 
 
 @dataclass
-class GroupView:
+class Applicant:
+    membership_id: int
+    user: User
+
+
+@dataclass
+class GroupCard:
+    """Данные карточки группы. Что попало в карточку, определено ролью смотрящего."""
+
     group: Group
     service: Service
-    role: str
-    membership_status: MembershipStatus | None
-    # Контакт организатора виден только участнику с одобренной заявкой
-    owner_contact: User | None
-
-
-async def get_open_group(
-    session_maker: SessionMaker, group_id: int
-) -> tuple[Group, Service] | None:
-    async with session_maker() as session:
-        group = await session.get(Group, group_id)
-        if group is None or group.status != GroupStatus.OPEN or group.slots_free < 1:
-            return None
-        return group, await session.get(Service, group.service_id)  # type: ignore[return-value]
+    role: Role
+    owner: User | None  # контакт организатора: только участнику с одобренной заявкой
+    participants: list[User]  # только организатору и участникам
+    applicants: list[Applicant]  # ждущие заявки: только организатору
 
 
 async def apply_to_group(
@@ -257,29 +256,47 @@ async def list_user_groups(session_maker: SessionMaker, user_id: int) -> list[Gr
         return entries
 
 
-async def get_group_view(
-    session_maker: SessionMaker, group_id: int, user_id: int
-) -> GroupView | None:
+async def get_group_card(
+    session_maker: SessionMaker, group_id: int, viewer_id: int
+) -> GroupCard | None:
+    """Карточка группы для конкретного пользователя; чужие данные отдаёт только по роли."""
     async with session_maker() as session:
         group = await session.get(Group, group_id)
         if group is None or group.status == GroupStatus.CLOSED:
             return None
+        role = await role_in_session(session, group, viewer_id)
+        if role == Role.NONE and (group.status != GroupStatus.OPEN or group.slots_free < 1):
+            return None  # посторонний видит только открытые группы со свободными местами
         service = await session.get(Service, group.service_id)
-        if group.owner_id == user_id:
-            return GroupView(group, service, "owner", None, None)  # type: ignore[arg-type]
-        membership = await session.scalar(
-            select(Membership).where(
-                Membership.group_id == group_id,
-                Membership.user_id == user_id,
-                Membership.status.in_(ACTIVE),
+        participants: list[User] = []
+        applicants: list[Applicant] = []
+        owner = None
+        if role in (Role.OWNER, Role.MEMBER):
+            rows = await session.scalars(
+                select(User)
+                .join(Membership, Membership.user_id == User.id)
+                .where(
+                    Membership.group_id == group_id,
+                    Membership.status == MembershipStatus.APPROVED,
+                )
+                .order_by(Membership.joined_at, Membership.id)
             )
-        )
-        if membership is None:
-            return None
-        contact = None
-        if membership.status == MembershipStatus.APPROVED:
-            contact = await session.get(User, group.owner_id)
-        return GroupView(group, service, "member", membership.status, contact)  # type: ignore[arg-type]
+            participants = list(rows)
+        if role == Role.MEMBER:
+            owner = await session.get(User, group.owner_id)
+        if role == Role.OWNER:
+            pending = await session.execute(
+                select(Membership.id, User)
+                .join(User, Membership.user_id == User.id)
+                .where(
+                    Membership.group_id == group_id,
+                    Membership.status == MembershipStatus.PENDING,
+                )
+                .order_by(Membership.id)
+                .limit(MAX_SHOWN_APPLICANTS)
+            )
+            applicants = [Applicant(mid, user) for mid, user in pending]
+        return GroupCard(group, service, role, owner, participants, applicants)  # type: ignore[arg-type]
 
 
 async def list_members(session_maker: SessionMaker, group_id: int, owner_id: int) -> list[User]:

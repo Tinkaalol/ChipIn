@@ -1,6 +1,7 @@
 import asyncio
 from collections import defaultdict
 from decimal import ROUND_CEILING, Decimal
+from enum import StrEnum
 
 from sqlalchemy import ColumnElement, exists, func, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
@@ -19,6 +20,13 @@ SessionMaker = async_sessionmaker[AsyncSession]
 # Создание групп одного владельца идёт по очереди: проверка лимита и вставка не должны
 # перемешиваться между параллельными запросами (в PostgreSQL дополнительно FOR UPDATE).
 _owner_locks: defaultdict[int, asyncio.Lock] = defaultdict(asyncio.Lock)
+
+
+class Role(StrEnum):
+    OWNER = "owner"
+    MEMBER = "member"
+    PENDING = "pending"
+    NONE = "none"
 
 
 class GroupError(Exception):
@@ -192,3 +200,28 @@ async def count_open_groups_by_service(
     )
     async with session_maker() as session:
         return {service_id: count for service_id, count in await session.execute(stmt)}
+
+
+async def role_in_session(session: AsyncSession, group: Group | None, user_id: int) -> Role:
+    if group is None:
+        return Role.NONE
+    if group.owner_id == user_id:
+        return Role.OWNER
+    status = await session.scalar(
+        select(Membership.status).where(
+            Membership.group_id == group.id,
+            Membership.user_id == user_id,
+            Membership.status.in_((MembershipStatus.PENDING, MembershipStatus.APPROVED)),
+        )
+    )
+    if status == MembershipStatus.APPROVED:
+        return Role.MEMBER
+    if status == MembershipStatus.PENDING:
+        return Role.PENDING
+    return Role.NONE
+
+
+async def get_user_role(session_maker: SessionMaker, group_id: int, user_id: int) -> Role:
+    """Роль пользователя в группе: owner, member (принят), pending (ждёт ответа) или none."""
+    async with session_maker() as session:
+        return await role_in_session(session, await session.get(Group, group_id), user_id)

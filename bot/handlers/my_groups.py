@@ -1,3 +1,4 @@
+from datetime import date, datetime
 from html import escape
 
 from aiogram import Bot, F, Router
@@ -8,6 +9,8 @@ from bot.db.models import GroupStatus, MembershipStatus, User
 from bot.db.session import session_maker
 from bot.services import groups as groups_svc
 from bot.services import memberships as svc
+from bot.services.groups import Role
+from bot.services.reminders import ALMATY, next_payment_date
 from bot.services.users import register_user
 from bot.texts import contact_html, money
 
@@ -71,43 +74,78 @@ async def show_my_groups(callback: CallbackQuery) -> None:
 
 @router.callback_query(F.data.startswith(VIEW))
 async def view_group(callback: CallbackQuery) -> None:
-    await render_group(callback, _gid(callback, VIEW))
+    await render_card(callback, _gid(callback, VIEW))
 
 
-async def render_group(callback: CallbackQuery, group_id: int) -> None:
-    view = await svc.get_group_view(session_maker, group_id, await _current_user_id(callback))
-    if view is None:
-        await callback.answer("Эта группа недоступна.", show_alert=True)
-        return
-    g, s = view.group, view.service
+def _participant(user: User) -> str:
+    # В карточке только username; без него контакт не раскрываем
+    return f"@{escape(user.username)}" if user.username else "участник без username"
+
+
+def build_card(
+    card: svc.GroupCard, list_page: int | None, today: date
+) -> tuple[str, list[list[tuple[str, str]]]]:
+    """Текст и кнопки карточки группы; вид зависит от роли смотрящего."""
+    g, s = card.group, card.service
+    next_date = next_payment_date(g.billing_day, today)
     lines = [
         f"{escape(s.name)} {escape(s.plan_name)} — {STATUS_LABELS[g.status]}",
-        f"Свободно мест: {g.slots_free} из {g.slots_total}",
-        f"С участника: {money(g.price_per_member, s.currency)} в месяц",
-        f"Оплата: {g.billing_day}-го числа",
+        f"С человека: {money(g.price_per_member, s.currency)} в месяц "
+        f"(подписка целиком: {money(s.price_month, s.currency)})",
+        f"Участников: {g.slots_total - g.slots_free} из {g.slots_total} "
+        f"(с организатором), свободно мест: {g.slots_free}",
+        f"Оплата: {g.billing_day}-го числа, ближайшая — {next_date:%d.%m.%Y}",
     ]
-    if view.role == "owner":
-        rows = [
-            [("Участники", f"{MEMBERS}{g.id}")],
-            [("Закрыть группу", f"{CLOSE}{g.id}")],
-            HOME_ROW,
-        ]
-    else:
-        if view.owner_contact is not None:
-            contact = contact_html(view.owner_contact.telegram_id, view.owner_contact.username)
-            lines.append(f"Организатор: {contact}")
-            lines.append("Деньги переводите организатору напрямую, бот их не принимает.")
-            leave_text = "Выйти из группы"
-        else:
-            lines.append("Заявка на рассмотрении у организатора.")
-            leave_text = "Отозвать заявку"
-        rows = [[(leave_text, f"{LEAVE}{g.id}")]]
-        if view.owner_contact is not None:
+    rows: list[list[tuple[str, str]]] = []
+    if card.role == Role.OWNER:
+        lines.append("\nВы — организатор этой группы.")
+        lines.append(_people("Участники", card.participants, "Участников пока нет."))
+        if card.applicants:
+            lines.append(_people("Заявки ждут ответа", [a.user for a in card.applicants]))
+        for a in card.applicants:
+            who = f"@{a.user.username}" if a.user.username else "без username"
             rows.append(
-                [("Пожаловаться на организатора", f"{REPORT}{g.id}:{view.owner_contact.id}")]
+                [
+                    (f"✅ Принять {who}", f"{APPLICATION_DECIDE_PREFIX}ok:{a.membership_id}"),
+                    ("❌ Отклонить", f"{APPLICATION_DECIDE_PREFIX}no:{a.membership_id}"),
+                ]
             )
+        rows.append([("Участники", f"{MEMBERS}{g.id}"), ("Закрыть группу", f"{CLOSE}{g.id}")])
+    elif card.role == Role.MEMBER and card.owner is not None:
+        contact = contact_html(card.owner.telegram_id, card.owner.username)
+        lines.append(f"\nОрганизатор: {contact}")
+        lines.append("Деньги переводите организатору напрямую, бот их не принимает.")
+        lines.append(_people("Участники", card.participants))
+        rows.append([("Выйти из группы", f"{LEAVE}{g.id}")])
+        rows.append([("Пожаловаться на организатора", f"{REPORT}{g.id}:{card.owner.id}")])
+    elif card.role == Role.PENDING:
+        lines.append("\nЗаявка отправлена, ждём ответа.")
+        rows.append([("Отозвать заявку", f"{LEAVE}{g.id}")])
+    else:
+        lines.append("\nКонтакт организатора откроется после того, как он примет вашу заявку.")
+        rows.append([("Подать заявку", f"{keyboards.SEARCH_APPLY}{g.id}")])
+    if list_page is None:
         rows.append(HOME_ROW)
-    await ui.show(callback, "\n".join(lines), keyboards.build(rows), html=True)
+    else:
+        back = f"{keyboards.SEARCH_SERVICE}{s.id}:{list_page}"
+        rows.append([("« Назад к списку", back), ("Отмена", keyboards.HOME)])
+    return "\n".join(lines), rows
+
+
+def _people(title: str, users: list[User], empty: str = "") -> str:
+    if not users:
+        return empty
+    return f"{title}:\n" + "\n".join(f"• {_participant(u)}" for u in users)
+
+
+async def render_card(callback: CallbackQuery, group_id: int, list_page: int | None = None) -> None:
+    """Показывает карточку группы. Состав данных определяет сервер по роли, а не callback."""
+    card = await svc.get_group_card(session_maker, group_id, await _current_user_id(callback))
+    if card is None:
+        await callback.answer("Эта группа недоступна.", show_alert=True)
+        return
+    text, rows = build_card(card, list_page, datetime.now(ALMATY).date())
+    await ui.show(callback, text, keyboards.build(rows), html=True)
 
 
 @router.callback_query(F.data.startswith(MEMBERS))
@@ -219,4 +257,5 @@ async def decide_application(callback: CallbackQuery, bot: Bot) -> None:
         )
         verdict = "❌ Отклонена"
     original = callback.message.html_text if callback.message else ""  # type: ignore[union-attr]
-    await ui.show(callback, f"{original}\n\n{verdict}", None, html=True)
+    back = keyboards.build([[("« К моим группам", keyboards.MY_GROUPS)]])
+    await ui.show(callback, f"{original}\n\n{verdict}", back, html=True)

@@ -5,7 +5,7 @@ from aiogram.types import CallbackQuery
 
 from bot import keyboards, ui
 from bot.db.session import session_maker
-from bot.handlers.my_groups import APPLICATION_DECIDE_PREFIX
+from bot.handlers.my_groups import APPLICATION_DECIDE_PREFIX, render_card
 from bot.services import groups as groups_svc
 from bot.services import memberships as svc
 from bot.services.ratelimit import RATE_LIMIT_MESSAGE, application_limiter
@@ -14,9 +14,9 @@ from bot.texts import contact_html, money
 
 router = Router(name="search")
 
-SERVICE = "s:svc:"  # s:svc:<service_id>:<page>
+SERVICE = keyboards.SEARCH_SERVICE
 GROUP = "s:grp:"  # s:grp:<group_id>:<page>
-APPLY = "s:apply:"  # s:apply:<group_id>
+APPLY = keyboards.SEARCH_APPLY
 
 NAV_HOME = ("Отмена", keyboards.HOME)
 
@@ -81,23 +81,7 @@ async def show_groups(callback: CallbackQuery) -> None:
 @router.callback_query(F.data.startswith(GROUP))
 async def show_card(callback: CallbackQuery) -> None:
     group_id, page = (int(x) for x in (callback.data or "").removeprefix(GROUP).split(":"))
-    found = await svc.get_open_group(session_maker, group_id)
-    if found is None:
-        await callback.answer("Эта группа уже недоступна.", show_alert=True)
-        return
-    group, service = found
-    text = (
-        f"{service.name} {service.plan_name}\n"
-        f"С человека: {money(group.price_per_member, service.currency)} в месяц\n"
-        f"Свободных мест: {group.slots_free} из {group.slots_total}\n"
-        f"Оплата: {group.billing_day}-го числа каждого месяца\n\n"
-        "Контакт организатора откроется после того, как он примет вашу заявку."
-    )
-    rows = [
-        [("Подать заявку", f"{APPLY}{group.id}")],
-        [("« Назад", f"{SERVICE}{service.id}:{page}"), NAV_HOME],
-    ]
-    await ui.show(callback, text, keyboards.build(rows))
+    await render_card(callback, group_id, page)
 
 
 @router.callback_query(F.data.startswith(APPLY))

@@ -7,6 +7,8 @@ FIND_GROUP = "menu:find"
 CREATE_GROUP = "menu:create"
 MY_GROUPS = "menu:my"
 HOME = "menu:home"
+SEARCH_SERVICE = "s:svc:"  # s:svc:<service_id>:<page>
+SEARCH_APPLY = "s:apply:"  # s:apply:<group_id>
 
 CG_BACK = "cg:back"
 CG_CANCEL = "cg:cancel"

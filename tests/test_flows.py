@@ -87,7 +87,7 @@ async def test_organizer_contact_hidden_until_approved(dp, session_maker) -> Non
     await press(dp, bot, PATIENT, f"g:view:{group.id}", "pat")
     before = "\n".join(session.texts_to(PATIENT))
     assert SECRET not in before and str(OWNER) not in before
-    assert "Заявка на рассмотрении" in before
+    assert "Заявка отправлена, ждём ответа" in before
 
     # организатор получил заявку и принимает её
     owner_msgs = session.texts_to(OWNER)

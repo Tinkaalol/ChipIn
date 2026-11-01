@@ -173,6 +173,8 @@ async def test_pager_and_card_hide_organizer(dp, session_maker) -> None:
 
     await dp.feed_update(bot, callback_update(VIEWER, f"s:grp:{created[0].id}:1"))
     card = session.texts()[-1]
-    assert "secret_owner" not in card and "Свободных мест: 2 из 4" in card
+    assert (
+        "secret_owner" not in card and "свободно мест: 2" in card and "Участников: 2 из 4" in card
+    )
     everything = "\n".join(session.texts())
     assert "secret_owner" not in everything

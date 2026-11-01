@@ -182,18 +182,6 @@ async def test_close_group(session_maker) -> None:
     assert await svc.list_user_groups(session_maker, owner.id) == []
 
 
-async def test_group_view_hides_contact_until_approved(session_maker) -> None:
-    owner, _, group, (u1, u2) = await make_world(session_maker, free=2)
-    app = await svc.apply_to_group(session_maker, group.id, u1.id)
-    pending = await svc.get_group_view(session_maker, group.id, u1.id)
-    assert pending.role == "member" and pending.owner_contact is None
-    await svc.decide_application(session_maker, app.membership.id, owner.id, True)
-    approved = await svc.get_group_view(session_maker, group.id, u1.id)
-    assert approved.owner_contact.id == owner.id
-    assert (await svc.get_group_view(session_maker, group.id, owner.id)).role == "owner"
-    assert await svc.get_group_view(session_maker, group.id, u2.id) is None
-
-
 async def test_members_list_owner_only(session_maker) -> None:
     owner, _, group, (u1, u2) = await make_world(session_maker, free=2)
     app = await svc.apply_to_group(session_maker, group.id, u1.id)

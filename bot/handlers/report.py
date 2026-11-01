@@ -8,7 +8,7 @@ from aiogram.types import User as TgUser
 from bot import keyboards, ui
 from bot.config import get_settings
 from bot.db.session import session_maker
-from bot.handlers.my_groups import render_group
+from bot.handlers.my_groups import render_card
 from bot.services import groups as groups_svc
 from bot.services import moderation as mod
 from bot.services.users import register_user
@@ -57,7 +57,7 @@ async def back(callback: CallbackQuery, state: FSMContext) -> None:
         return
     group_id = (await state.get_data())["group_id"]
     await state.clear()
-    await render_group(callback, group_id)
+    await render_card(callback, group_id)
 
 
 @router.callback_query(F.data.startswith(REASON), ReportFlow.reason)
