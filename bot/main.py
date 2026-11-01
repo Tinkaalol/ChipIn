@@ -11,6 +11,7 @@ from bot.db.session import session_maker
 from bot.handlers import create_group, errors, my_groups, search, start
 from bot.health import start_health_server
 from bot.services.catalog import seed_services
+from bot.services.reminders import start_reminders
 
 
 def build_dispatcher() -> Dispatcher:
@@ -43,9 +44,11 @@ async def main() -> None:
     dp = build_dispatcher()
     logging.getLogger(__name__).info("Бот запущен (long polling)")
     health = await start_health_server()
+    scheduler = start_reminders(bot, session_maker)
     try:
         await dp.start_polling(bot)
     finally:
+        scheduler.shutdown(wait=False)
         if health is not None:
             await health.cleanup()
 

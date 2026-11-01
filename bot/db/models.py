@@ -1,8 +1,8 @@
 import enum
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 from decimal import Decimal
 
-from sqlalchemy import BigInteger, DateTime, Enum, ForeignKey, Numeric, String, Text
+from sqlalchemy import BigInteger, Date, DateTime, Enum, ForeignKey, Numeric, String, Text
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 
@@ -79,6 +79,8 @@ class Group(Base):
     billing_day: Mapped[int]
     status: Mapped[GroupStatus] = mapped_column(_enum(GroupStatus), default=GroupStatus.OPEN)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+    # День, когда по группе уже отправлено напоминание об оплате (защита от дублей)
+    last_reminded_on: Mapped[date | None] = mapped_column(Date)
 
 
 class Membership(Base):
