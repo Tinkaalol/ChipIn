@@ -2,12 +2,13 @@ import asyncio
 from collections import defaultdict
 from decimal import ROUND_CEILING, Decimal
 
-from sqlalchemy import func, select
+from sqlalchemy import ColumnElement, exists, func, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from bot.db.models import Group, GroupStatus, Service, User
+from bot.db.models import Group, GroupStatus, Membership, MembershipStatus, Service, User
 
 MAX_OPEN_GROUPS = 3
+PAGE_SIZE = 5
 BILLING_DAY_MIN = 1
 BILLING_DAY_MAX = 28
 CENT = Decimal("0.01")
@@ -145,3 +146,49 @@ async def list_owned_groups(
             .order_by(Group.id.desc())
         )
         return [(g, s) for g, s in (await session.execute(stmt)).all()]
+
+
+def _visible_to(viewer_id: int) -> list[ColumnElement[bool]]:
+    """Условия поиска: открытые группы со свободными местами, кроме своих и тех, где
+    пользователь уже состоит, ждёт ответа или получил отказ."""
+    already_involved = exists().where(
+        Membership.group_id == Group.id,
+        Membership.user_id == viewer_id,
+        Membership.status.in_(
+            (MembershipStatus.PENDING, MembershipStatus.APPROVED, MembershipStatus.REJECTED)
+        ),
+    )
+    return [
+        Group.status == GroupStatus.OPEN,
+        Group.slots_free > 0,
+        Group.owner_id != viewer_id,
+        ~already_involved,
+    ]
+
+
+async def list_open_groups(
+    session_maker: SessionMaker, service_id: int, viewer_id: int, offset: int, limit: int
+) -> list[Group]:
+    """Группы сервиса для просмотра: больше свободных мест выше, при равенстве новее выше."""
+    stmt = (
+        select(Group)
+        .where(Group.service_id == service_id, *_visible_to(viewer_id))
+        .order_by(Group.slots_free.desc(), Group.created_at.desc(), Group.id.desc())
+        .offset(max(offset, 0))
+        .limit(limit)
+    )
+    async with session_maker() as session:
+        return list(await session.scalars(stmt))
+
+
+async def count_open_groups_by_service(
+    session_maker: SessionMaker, viewer_id: int
+) -> dict[int, int]:
+    """Сколько групп видит пользователь по каждому сервису (для списка сервисов)."""
+    stmt = (
+        select(Group.service_id, func.count())
+        .where(*_visible_to(viewer_id))
+        .group_by(Group.service_id)
+    )
+    async with session_maker() as session:
+        return {service_id: count for service_id, count in await session.execute(stmt)}

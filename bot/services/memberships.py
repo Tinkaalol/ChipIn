@@ -1,22 +1,14 @@
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
-from sqlalchemy import func, select, update
+from sqlalchemy import select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot.db.models import Group, GroupStatus, Membership, MembershipStatus, Service, User
 from bot.services.groups import GroupError, SessionMaker
 
-PAGE_SIZE = 5
 ACTIVE = (MembershipStatus.PENDING, MembershipStatus.APPROVED)
-
-
-@dataclass
-class GroupPage:
-    groups: list[Group]
-    page: int
-    pages: int
 
 
 @dataclass
@@ -70,25 +62,6 @@ class GroupView:
     membership_status: MembershipStatus | None
     # Контакт организатора виден только участнику с одобренной заявкой
     owner_contact: User | None
-
-
-async def search_groups(
-    session_maker: SessionMaker, service_id: int, viewer_id: int, page: int
-) -> GroupPage:
-    """Открытые группы сервиса со свободными местами, без групп самого пользователя."""
-    cond = (
-        Group.service_id == service_id,
-        Group.status == GroupStatus.OPEN,
-        Group.slots_free > 0,
-        Group.owner_id != viewer_id,
-    )
-    async with session_maker() as session:
-        total = await session.scalar(select(func.count()).select_from(Group).where(*cond)) or 0
-        pages = max(1, -(-total // PAGE_SIZE))
-        page = min(max(page, 0), pages - 1)
-        stmt = select(Group).where(*cond).order_by(Group.id.desc())
-        rows = await session.scalars(stmt.offset(page * PAGE_SIZE).limit(PAGE_SIZE))
-        return GroupPage(list(rows), page, pages)
 
 
 async def get_open_group(

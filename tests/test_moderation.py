@@ -87,8 +87,7 @@ async def test_banned_user_cannot_apply_and_unban_restores(session_maker) -> Non
 async def test_closed_group_is_not_in_search_after_ban(session_maker) -> None:
     owner, service, _, (u1, _) = await make_world(session_maker, free=2)
     await mod.ban_user(session_maker, owner.id, protected_ids=set())
-    page = await ms.search_groups(session_maker, service.id, u1.id, 0)
-    assert page.groups == []
+    assert await groups_svc.list_open_groups(session_maker, service.id, u1.id, 0, 5) == []
 
 
 async def _joined_world(sm):

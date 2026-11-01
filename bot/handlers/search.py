@@ -23,8 +23,13 @@ NAV_HOME = ("Отмена", keyboards.HOME)
 
 @router.callback_query(F.data == keyboards.FIND_GROUP)
 async def choose_service(callback: CallbackQuery) -> None:
+    user = await register_user(session_maker, callback.from_user.id, callback.from_user.username)
     services = await groups_svc.list_active_services(session_maker)
-    rows = [[(f"{s.name} {s.plan_name}", f"{SERVICE}{s.id}:0")] for s in services]
+    counts = await groups_svc.count_open_groups_by_service(session_maker, user.id)
+    rows = [
+        [(f"{s.name} {s.plan_name} ({counts.get(s.id, 0)})", f"{SERVICE}{s.id}:0")]
+        for s in services
+    ]
     rows.append([("« Назад", keyboards.HOME), NAV_HOME])
     text = "Группу какого сервиса ищем?" if services else "Каталог сервисов пока пуст."
     await ui.show(callback, text, keyboards.build(rows))
@@ -38,31 +43,39 @@ async def show_groups(callback: CallbackQuery) -> None:
     if service is None:
         await callback.answer("Этот сервис недоступен.", show_alert=True)
         return
-    result = await svc.search_groups(session_maker, service_id, user.id, page)
+    total = (await groups_svc.count_open_groups_by_service(session_maker, user.id)).get(
+        service_id, 0
+    )
+    pages = max(1, -(-total // groups_svc.PAGE_SIZE))
+    page = min(max(page, 0), pages - 1)
+    groups = await groups_svc.list_open_groups(
+        session_maker, service_id, user.id, page * groups_svc.PAGE_SIZE, groups_svc.PAGE_SIZE
+    )
+    nav = [("« К сервисам", keyboards.FIND_GROUP), NAV_HOME]
+    if not groups:
+        rows = [[("Создать свою группу", keyboards.CREATE_GROUP)], nav]
+        await ui.show(callback, "Пока нет групп", keyboards.build(rows))
+        return
     rows = [
         [
             (
-                f"{money(g.price_per_member, service.currency)} · мест {g.slots_free}"
-                f" · оплата {g.billing_day}-го",
-                f"{GROUP}{g.id}:{result.page}",
+                f"{money(g.price_per_member, service.currency)} · {g.slots_free} из "
+                f"{g.slots_total} мест · оплата {g.billing_day}-го",
+                f"{GROUP}{g.id}:{page}",
             )
         ]
-        for g in result.groups
+        for g in groups
     ]
     pager = []
-    if result.page > 0:
-        pager.append(("◀", f"{SERVICE}{service_id}:{result.page - 1}"))
-    if result.page < result.pages - 1:
-        pager.append(("▶", f"{SERVICE}{service_id}:{result.page + 1}"))
+    if page > 0:
+        pager.append(("◀ Назад", f"{SERVICE}{service_id}:{page - 1}"))
+    if page < pages - 1:
+        pager.append(("Далее ▶", f"{SERVICE}{service_id}:{page + 1}"))
     if pager:
         rows.append(pager)
-    rows.append([("« Назад", keyboards.FIND_GROUP), NAV_HOME])
-    title = f"{service.name} {service.plan_name}"
-    if result.groups:
-        text = f"{title}: открытые группы (стр. {result.page + 1} из {result.pages})"
-    else:
-        text = f"{title}: пока нет открытых групп. Можно создать свою."
-    await ui.show(callback, text, keyboards.build(rows))
+    rows.append(nav)
+    title = f"{service.name} {service.plan_name}: открытые группы (стр. {page + 1} из {pages})"
+    await ui.show(callback, title, keyboards.build(rows))
 
 
 @router.callback_query(F.data.startswith(GROUP))

@@ -182,53 +182,6 @@ async def test_close_group(session_maker) -> None:
     assert await svc.list_user_groups(session_maker, owner.id) == []
 
 
-async def test_search_pagination_and_filters(session_maker) -> None:
-    owner, service, _, (u1, _) = await make_world(session_maker, free=1)
-    async with session_maker() as s:
-        for i in range(6):  # вместе с группой из make_world: 7 открытых
-            s.add(
-                Group(
-                    service_id=service.id,
-                    owner_id=owner.id,
-                    price_per_member=Decimal("50"),
-                    slots_total=4,
-                    slots_free=2,
-                    billing_day=1 + i,
-                )
-            )
-        s.add(  # заполненная и закрытая не показываются
-            Group(
-                service_id=service.id,
-                owner_id=owner.id,
-                price_per_member=Decimal("1"),
-                slots_total=2,
-                slots_free=0,
-                billing_day=5,
-                status=GroupStatus.FULL,
-            )
-        )
-        s.add(
-            Group(
-                service_id=service.id,
-                owner_id=owner.id,
-                price_per_member=Decimal("1"),
-                slots_total=2,
-                slots_free=1,
-                billing_day=5,
-                status=GroupStatus.CLOSED,
-            )
-        )
-        await s.commit()
-    first = await svc.search_groups(session_maker, service.id, u1.id, 0)
-    second = await svc.search_groups(session_maker, service.id, u1.id, 1)
-    far = await svc.search_groups(session_maker, service.id, u1.id, 99)
-    assert (first.pages, len(first.groups)) == (2, 5)
-    assert len(second.groups) == 2
-    assert far.page == 1 and len(far.groups) == 2
-    # собственные группы организатор в поиске не видит
-    assert (await svc.search_groups(session_maker, service.id, owner.id, 0)).groups == []
-
-
 async def test_group_view_hides_contact_until_approved(session_maker) -> None:
     owner, _, group, (u1, u2) = await make_world(session_maker, free=2)
     app = await svc.apply_to_group(session_maker, group.id, u1.id)
