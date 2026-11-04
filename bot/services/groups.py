@@ -1,15 +1,21 @@
 import asyncio
+import math
 from collections import defaultdict
+from contextlib import suppress
+from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
 from decimal import ROUND_CEILING, Decimal
 from enum import StrEnum
 
-from sqlalchemy import ColumnElement, exists, func, select
+from sqlalchemy import ColumnElement, and_, exists, func, or_, select, text, update
+from sqlalchemy.exc import IntegrityError, OperationalError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from bot.db.models import Group, GroupStatus, Membership, MembershipStatus, Service, User
 
 MAX_OPEN_GROUPS = 3
 PAGE_SIZE = 5
+REAPPLY_DELAY = timedelta(hours=24)  # пауза перед повторной заявкой после отказа
 BILLING_DAY_MIN = 1
 BILLING_DAY_MAX = 28
 CENT = Decimal("0.01")
@@ -159,11 +165,13 @@ async def list_owned_groups(
 def _visible_to(viewer_id: int) -> list[ColumnElement[bool]]:
     """Условия поиска: открытые группы со свободными местами, кроме своих и тех, где
     пользователь уже состоит, ждёт ответа или получил отказ."""
+    cutoff = datetime.now(UTC) - REAPPLY_DELAY
     already_involved = exists().where(
         Membership.group_id == Group.id,
         Membership.user_id == viewer_id,
-        Membership.status.in_(
-            (MembershipStatus.PENDING, MembershipStatus.APPROVED, MembershipStatus.REJECTED)
+        or_(
+            Membership.status.in_((MembershipStatus.PENDING, MembershipStatus.APPROVED)),
+            and_(Membership.status == MembershipStatus.REJECTED, Membership.decided_at > cutoff),
         ),
     )
     return [
@@ -225,3 +233,159 @@ async def get_user_role(session_maker: SessionMaker, group_id: int, user_id: int
     """Роль пользователя в группе: owner, member (принят), pending (ждёт ответа) или none."""
     async with session_maker() as session:
         return await role_in_session(session, await session.get(Group, group_id), user_id)
+
+
+@dataclass
+class Application:
+    membership: Membership
+    group: Group
+    service: Service
+    applicant: User
+    owner: User
+
+
+@dataclass
+class Decision:
+    membership: Membership
+    group: Group
+    service: Service
+    member: User
+    owner: User
+    approved: bool
+
+
+def _as_utc(moment: datetime) -> datetime:
+    # SQLite отдаёт время без пояса, хотя мы всегда пишем UTC
+    return moment if moment.tzinfo else moment.replace(tzinfo=UTC)
+
+
+async def request_join(
+    session_maker: SessionMaker, group_id: int, applicant_id: int
+) -> Application:
+    """Создаёт заявку (pending) от пользователя в группу."""
+    async with session_maker() as session, session.begin():
+        group = await session.get(Group, group_id)
+        if group is None:
+            raise GroupError("Группа не найдена.")
+        if group.status == GroupStatus.CLOSED:
+            raise GroupError("Эта группа закрыта.")
+        if group.status == GroupStatus.FULL or group.slots_free < 1:
+            raise GroupError("В этой группе нет свободных мест.")
+        applicant = await session.get(User, applicant_id)
+        if applicant is None or applicant.is_banned:
+            raise GroupError("Вам недоступна подача заявок.")
+        if group.owner_id == applicant_id:
+            raise GroupError("Это ваша собственная группа.")
+        active = await session.scalar(
+            select(Membership.status).where(
+                Membership.group_id == group_id,
+                Membership.user_id == applicant_id,
+                Membership.status.in_((MembershipStatus.PENDING, MembershipStatus.APPROVED)),
+            )
+        )
+        if active == MembershipStatus.APPROVED:
+            raise GroupError("Вы уже участник этой группы.")
+        if active == MembershipStatus.PENDING:
+            raise GroupError("Вы уже подали заявку, ждите ответа организатора.")
+        await _check_reapply_delay(session, group_id, applicant_id)
+        membership = Membership(group_id=group_id, user_id=applicant_id)
+        session.add(membership)
+        try:
+            await session.flush()
+        except IntegrityError:
+            # Параллельный двойной клик: уникальный индекс не дал создать вторую заявку
+            raise GroupError("Вы уже подали заявку, ждите ответа организатора.") from None
+        owner = await session.get(User, group.owner_id)
+        service = await session.get(Service, group.service_id)
+        return Application(membership, group, service, applicant, owner)  # type: ignore[arg-type]
+
+
+async def _check_reapply_delay(session: AsyncSession, group_id: int, applicant_id: int) -> None:
+    rejected_at = await session.scalar(
+        select(func.max(Membership.decided_at)).where(
+            Membership.group_id == group_id,
+            Membership.user_id == applicant_id,
+            Membership.status == MembershipStatus.REJECTED,
+        )
+    )
+    if rejected_at is None:
+        return
+    wait = _as_utc(rejected_at) + REAPPLY_DELAY - datetime.now(UTC)
+    if wait > timedelta(0):
+        hours = math.ceil(wait.total_seconds() / 3600)
+        raise GroupError(f"Организатор отклонил вашу заявку. Подать новую можно через {hours} ч.")
+
+
+async def _lock_group(session: AsyncSession, group_id: int) -> Group | None:
+    """Блокирует строку группы до конца транзакции.
+
+    PostgreSQL: SELECT ... FOR UPDATE. SQLite его не поддерживает, поэтому там берём
+    блокировку записи на всю базу (BEGIN IMMEDIATE), и вторая транзакция ждёт первую.
+    """
+    if session.bind is not None and session.bind.dialect.name == "sqlite":
+        with suppress(OperationalError):  # уже внутри транзакции: хватит условных UPDATE ниже
+            await session.execute(text("BEGIN IMMEDIATE"))
+    return await session.get(Group, group_id, with_for_update=True, populate_existing=True)
+
+
+async def _decide(
+    session_maker: SessionMaker, membership_id: int, actor_id: int, approve: bool
+) -> Decision:
+    async with session_maker() as session, session.begin():
+        membership = await session.get(Membership, membership_id)
+        if membership is None:
+            raise GroupError("Заявка не найдена.")
+        group = await _lock_group(session, membership.group_id)
+        if group is None or group.owner_id != actor_id:
+            raise GroupError("Это не ваша группа.")
+        await session.refresh(membership)  # статус после получения блокировки, а не до неё
+        if membership.status != MembershipStatus.PENDING:
+            raise GroupError("Эта заявка уже обработана.")
+        if approve:
+            await _take_slot(session, group.id)
+        # Условный UPDATE — вторая линия защиты: если заявку всё же изменил параллельный
+        # запрос, rowcount будет 0, и исключение откатит занятое место
+        now = datetime.now(UTC)
+        result = await session.execute(
+            update(Membership)
+            .where(Membership.id == membership_id, Membership.status == MembershipStatus.PENDING)
+            .values(
+                status=MembershipStatus.APPROVED if approve else MembershipStatus.REJECTED,
+                joined_at=now if approve else None,
+                decided_at=now,
+            )
+        )
+        if result.rowcount == 0:
+            raise GroupError("Эта заявка уже обработана.")
+        await session.refresh(group)
+        await session.refresh(membership)
+        if group.slots_free == 0 and group.status == GroupStatus.OPEN:
+            group.status = GroupStatus.FULL
+        member = await session.get(User, membership.user_id)
+        owner = await session.get(User, group.owner_id)
+        service = await session.get(Service, group.service_id)
+        return Decision(membership, group, service, member, owner, approve)  # type: ignore[arg-type]
+
+
+async def _take_slot(session: AsyncSession, group_id: int) -> None:
+    # Атомарное «уменьшить, если есть что уменьшать»: два одобрения на последнее место
+    # не пройдут оба, даже если блокировка строки по какой-то причине не сработала
+    result = await session.execute(
+        update(Group)
+        .where(Group.id == group_id, Group.status == GroupStatus.OPEN, Group.slots_free > 0)
+        .values(slots_free=Group.slots_free - 1)
+    )
+    if result.rowcount == 0:
+        raise GroupError("Свободных мест не осталось, заявку принять нельзя.")
+
+
+async def approve_member(
+    session_maker: SessionMaker, membership_id: int, owner_id: int
+) -> Decision:
+    """Принимает заявку: занимает место, при нуле свободных мест группа становится full."""
+    return await _decide(session_maker, membership_id, owner_id, approve=True)
+
+
+async def reject_member(session_maker: SessionMaker, membership_id: int, owner_id: int) -> Decision:
+    """Отклоняет заявку; повторно подать её можно через REAPPLY_DELAY."""
+    return await _decide(session_maker, membership_id, owner_id, approve=False)

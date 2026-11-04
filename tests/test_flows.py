@@ -7,7 +7,6 @@ from sqlalchemy import select
 
 from bot.db.models import Group, GroupStatus, Membership, MembershipStatus
 from bot.services import groups as groups_svc
-from bot.services import memberships as ms
 from bot.services.catalog import seed_services
 from bot.services.ratelimit import RateLimiter
 from bot.services.users import register_user
@@ -199,12 +198,14 @@ async def test_concurrent_duplicate_applications_create_one(file_session_maker) 
 
     _, _, group, (u1, _) = await make_world(file_session_maker, free=2)
     results = await asyncio.gather(
-        *[ms.apply_to_group(file_session_maker, group.id, u1.id) for _ in range(5)],
+        *[groups_svc.request_join(file_session_maker, group.id, u1.id) for _ in range(5)],
         return_exceptions=True,
     )
-    assert sum(isinstance(r, ms.Application) for r in results) == 1
+    assert sum(isinstance(r, groups_svc.Application) for r in results) == 1
     assert all(
-        isinstance(r, groups_svc.GroupError) for r in results if not isinstance(r, ms.Application)
+        isinstance(r, groups_svc.GroupError)
+        for r in results
+        if not isinstance(r, groups_svc.Application)
     )
     async with file_session_maker() as s:
         assert len((await s.scalars(select(Membership))).all()) == 1
@@ -238,3 +239,54 @@ async def test_start_registers_user_and_shows_menu(dp, session_maker) -> None:
         from bot.db.models import User
 
         assert (await s.scalar(select(User).where(User.telegram_id == 321))).username == "newbie"
+
+
+async def test_owner_gets_request_message_and_member_gets_contact_and_date(
+    dp, session_maker
+) -> None:
+    bot, session = make_bot()
+    group = await create_group_via_bot(dp, bot, session_maker)  # оплата 7-го числа
+    await press(dp, bot, PATIENT, f"s:apply:{group.id}", "pat")
+    assert any(
+        t.startswith("Новая заявка в группу Spotify Family: @pat") for t in session.texts_to(OWNER)
+    )
+    async with session_maker() as s:
+        membership = await s.scalar(select(Membership))
+    await press(dp, bot, OWNER, f"m:ok:{membership.id}", SECRET)
+    message = session.texts_to(PATIENT)[-1]
+    assert f"@{SECRET}" in message and "Ближайшая оплата: " in message
+    from datetime import datetime
+
+    from bot.services.reminders import ALMATY, next_payment_date
+
+    expected = next_payment_date(7, datetime.now(ALMATY).date())
+    assert f"{expected:%d.%m.%Y}" in message
+
+
+async def test_rejection_is_polite_and_survives_blocked_member(dp, session_maker) -> None:
+    bot, session = make_bot(blocked_chats={PATIENT})
+    group = await create_group_via_bot(dp, bot, session_maker)
+    await press(dp, bot, PATIENT, f"s:apply:{group.id}", "pat")
+    async with session_maker() as s:
+        membership = await s.scalar(select(Membership))
+    await press(dp, bot, OWNER, f"m:no:{membership.id}", SECRET)  # участник заблокировал бота
+    async with session_maker() as s:
+        assert (await s.get(Membership, membership.id)).status == MembershipStatus.REJECTED
+    assert "Отклонена" in session.texts_to(OWNER)[-1]
+
+    bot2, session2 = make_bot()
+    group2 = await create_group_via_bot_second(dp, bot2, session_maker)
+    await press(dp, bot2, 400, f"s:apply:{group2.id}", "other")
+    async with session_maker() as s:
+        m2 = (await s.scalars(select(Membership).where(Membership.group_id == group2.id))).one()
+    await press(dp, bot2, OWNER, f"m:no:{m2.id}", SECRET)
+    text = session2.texts_to(400)[-1]
+    assert "К сожалению" in text and "через 24 часа" in text
+
+
+async def create_group_via_bot_second(dp, bot, session_maker) -> Group:
+    for data in ("menu:create", "cg:svc:2", "cg:next", "cg:total:3", "cg:free:2", "cg:day:9"):
+        await press(dp, bot, OWNER, data, SECRET)
+    await press(dp, bot, OWNER, "cg:confirm", SECRET)
+    async with session_maker() as s:
+        return (await s.scalars(select(Group).order_by(Group.id.desc()))).first()

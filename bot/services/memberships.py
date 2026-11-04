@@ -1,8 +1,6 @@
 from dataclasses import dataclass
-from datetime import UTC, datetime
 
 from sqlalchemy import select, update
-from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot.db.models import Group, GroupStatus, Membership, MembershipStatus, Service, User
@@ -10,25 +8,6 @@ from bot.services.groups import GroupError, Role, SessionMaker, role_in_session
 
 MAX_SHOWN_APPLICANTS = 10
 ACTIVE = (MembershipStatus.PENDING, MembershipStatus.APPROVED)
-
-
-@dataclass
-class Application:
-    membership: Membership
-    group: Group
-    service: Service
-    applicant: User
-    owner: User
-
-
-@dataclass
-class Decision:
-    membership: Membership
-    group: Group
-    service: Service
-    member: User
-    owner: User
-    approved: bool
 
 
 @dataclass
@@ -71,92 +50,6 @@ class GroupCard:
     owner: User | None  # контакт организатора: только участнику с одобренной заявкой
     participants: list[User]  # только организатору и участникам
     applicants: list[Applicant]  # ждущие заявки: только организатору
-
-
-async def apply_to_group(
-    session_maker: SessionMaker, group_id: int, applicant_id: int
-) -> Application:
-    async with session_maker() as session, session.begin():
-        group = await session.get(Group, group_id)
-        if group is None or group.status != GroupStatus.OPEN or group.slots_free < 1:
-            raise GroupError("К сожалению, в этой группе уже нет мест.")
-        applicant = await session.get(User, applicant_id)
-        if applicant is None or applicant.is_banned:
-            raise GroupError("Вам недоступна подача заявок.")
-        if group.owner_id == applicant_id:
-            raise GroupError("Это ваша собственная группа.")
-        existing = await session.scalar(
-            select(Membership).where(
-                Membership.group_id == group_id,
-                Membership.user_id == applicant_id,
-                Membership.status.in_((*ACTIVE, MembershipStatus.REJECTED)),
-            )
-        )
-        if existing is not None:
-            raise GroupError(
-                {
-                    MembershipStatus.PENDING: "Вы уже подали заявку, ждите ответа организатора.",
-                    MembershipStatus.APPROVED: "Вы уже участник этой группы.",
-                    MembershipStatus.REJECTED: "Организатор отклонил вашу заявку в эту группу.",
-                }[existing.status]
-            )
-        membership = Membership(group_id=group_id, user_id=applicant_id)
-        session.add(membership)
-        try:
-            await session.flush()
-        except IntegrityError:
-            # Параллельный двойной клик: уникальный индекс не дал создать вторую заявку
-            raise GroupError("Вы уже подали заявку, ждите ответа организатора.") from None
-        owner = await session.get(User, group.owner_id)
-        service = await session.get(Service, group.service_id)
-        return Application(membership, group, service, applicant, owner)  # type: ignore[arg-type]
-
-
-async def decide_application(
-    session_maker: SessionMaker, membership_id: int, actor_id: int, approve: bool
-) -> Decision:
-    """Принять или отклонить заявку. Принятие и занятие места — одна транзакция."""
-    async with session_maker() as session, session.begin():
-        membership = await session.get(Membership, membership_id)
-        if membership is None:
-            raise GroupError("Заявка не найдена.")
-        group = await session.get(Group, membership.group_id)
-        if group is None or group.owner_id != actor_id:
-            raise GroupError("Это не ваша группа.")
-        if membership.status != MembershipStatus.PENDING:
-            raise GroupError("Эта заявка уже обработана.")
-        if approve:
-            await _take_slot(session, group.id)
-        # Условный UPDATE: если заявку успел изменить параллельный запрос, rowcount будет 0,
-        # исключение откатит и занятое место
-        new_status = MembershipStatus.APPROVED if approve else MembershipStatus.REJECTED
-        result = await session.execute(
-            update(Membership)
-            .where(Membership.id == membership_id, Membership.status == MembershipStatus.PENDING)
-            .values(status=new_status, joined_at=datetime.now(UTC) if approve else None)
-        )
-        if result.rowcount == 0:
-            raise GroupError("Эта заявка уже обработана.")
-        await session.refresh(group)
-        await session.refresh(membership)
-        if group.slots_free == 0 and group.status == GroupStatus.OPEN:
-            group.status = GroupStatus.FULL
-        member = await session.get(User, membership.user_id)
-        owner = await session.get(User, group.owner_id)
-        service = await session.get(Service, group.service_id)
-        return Decision(membership, group, service, member, owner, approve)  # type: ignore[arg-type]
-
-
-async def _take_slot(session: AsyncSession, group_id: int) -> None:
-    # Атомарное «уменьшить, если есть что уменьшать»: два одобрения на последнее место
-    # не пройдут оба, потому что второй UPDATE уже не найдёт slots_free > 0
-    result = await session.execute(
-        update(Group)
-        .where(Group.id == group_id, Group.status == GroupStatus.OPEN, Group.slots_free > 0)
-        .values(slots_free=Group.slots_free - 1)
-    )
-    if result.rowcount == 0:
-        raise GroupError("Свободных мест не осталось, заявку принять нельзя.")
 
 
 async def release_membership(session: AsyncSession, membership: Membership) -> Group:

@@ -227,22 +227,23 @@ async def decide_application(callback: CallbackQuery, bot: Bot) -> None:
     _, action, membership_id = (callback.data or "").split(":")
     approve = action == "ok"
     try:
-        d = await svc.decide_application(
-            session_maker, int(membership_id), await _current_user_id(callback), approve
-        )
+        decide = groups_svc.approve_member if approve else groups_svc.reject_member
+        d = await decide(session_maker, int(membership_id), await _current_user_id(callback))
     except groups_svc.GroupError as e:
         await callback.answer(str(e), show_alert=True)
         return
     title = f"{d.service.name} {d.service.plan_name}"
     if approve:
         owner_contact = contact_html(d.owner.telegram_id, d.owner.username)
+        next_date = next_payment_date(d.group.billing_day, datetime.now(ALMATY).date())
         delivered = await ui.notify(
             bot,
             d.member.telegram_id,
             f"Ваша заявка в группу {escape(title)} принята.\n"
             f"Организатор: {owner_contact}\n"
-            f"Оплата {d.group.billing_day}-го числа каждого месяца: "
-            f"{money(d.group.price_per_member, d.service.currency)}.\n"
+            f"Ближайшая оплата: {next_date:%d.%m.%Y} "
+            f"({d.group.billing_day}-го числа каждого месяца), "
+            f"взнос {money(d.group.price_per_member, d.service.currency)}.\n"
             "Деньги переводите организатору напрямую, бот их не принимает.",
             html=True,
         )
@@ -253,7 +254,11 @@ async def decide_application(callback: CallbackQuery, bot: Bot) -> None:
             verdict += "\nВсе места заняты, набор закрыт."
     else:
         await ui.notify(
-            bot, d.member.telegram_id, f"Организатор отклонил вашу заявку в группу {title}."
+            bot,
+            d.member.telegram_id,
+            f"К сожалению, организатор не смог принять вашу заявку в группу {title}. "
+            "Спасибо за интерес! Новую заявку в эту группу можно подать через 24 часа, "
+            "а пока загляните в другие группы.",
         )
         verdict = "❌ Отклонена"
     original = callback.message.html_text if callback.message else ""  # type: ignore[union-attr]

@@ -3,7 +3,6 @@ from decimal import Decimal
 
 from bot.db.models import Group, GroupStatus, Membership, MembershipStatus, Service, User
 from bot.services import groups as svc
-from bot.services import memberships as ms
 from bot.services.catalog import seed_services
 from tests.fakes import callback_update, make_bot
 from tests.test_memberships import make_world
@@ -67,7 +66,14 @@ async def test_excludes_own_joined_pending_and_rejected(session_maker) -> None:
             (rejected, MembershipStatus.REJECTED),
             (left, MembershipStatus.LEFT),
         ):
-            s.add(Membership(group_id=group.id, user_id=viewer.id, status=status))
+            s.add(
+                Membership(
+                    group_id=group.id,
+                    user_id=viewer.id,
+                    status=status,
+                    decided_at=datetime.now(UTC),
+                )
+            )
         await s.commit()
 
     visible = set(await ids(session_maker, service.id, viewer.id))
@@ -117,7 +123,7 @@ async def test_counts_by_service_use_same_rules(session_maker) -> None:
 async def test_applying_hides_group_from_list(session_maker) -> None:
     owner, service, base, viewer = await viewer_and_world(session_maker)
     assert await ids(session_maker, service.id, viewer.id) == [base.id]
-    await ms.apply_to_group(session_maker, base.id, viewer.id)
+    await svc.request_join(session_maker, base.id, viewer.id)
     assert await ids(session_maker, service.id, viewer.id) == []
 
 
@@ -178,3 +184,27 @@ async def test_pager_and_card_hide_organizer(dp, session_maker) -> None:
     )
     everything = "\n".join(session.texts())
     assert "secret_owner" not in everything
+
+
+async def test_rejected_group_returns_to_list_after_24_hours(session_maker) -> None:
+    owner, service, base, viewer = await viewer_and_world(session_maker)
+    old = await add_group(session_maker, owner.id, service.id)
+    async with session_maker() as s:
+        s.add(
+            Membership(
+                group_id=base.id,
+                user_id=viewer.id,
+                status=MembershipStatus.REJECTED,
+                decided_at=datetime.now(UTC) - timedelta(hours=1),
+            )
+        )
+        s.add(
+            Membership(
+                group_id=old.id,
+                user_id=viewer.id,
+                status=MembershipStatus.REJECTED,
+                decided_at=datetime.now(UTC) - timedelta(hours=25),
+            )
+        )
+        await s.commit()
+    assert await ids(session_maker, service.id, viewer.id) == [old.id]

@@ -7,7 +7,6 @@ from bot import keyboards, ui
 from bot.db.session import session_maker
 from bot.handlers.my_groups import APPLICATION_DECIDE_PREFIX, render_card
 from bot.services import groups as groups_svc
-from bot.services import memberships as svc
 from bot.services.ratelimit import RATE_LIMIT_MESSAGE, application_limiter
 from bot.services.users import register_user
 from bot.texts import contact_html, money
@@ -92,7 +91,7 @@ async def apply(callback: CallbackQuery, bot: Bot) -> None:
         await callback.answer(RATE_LIMIT_MESSAGE, show_alert=True)
         return
     try:
-        app = await svc.apply_to_group(session_maker, group_id, user.id)
+        app = await groups_svc.request_join(session_maker, group_id, user.id)
     except groups_svc.GroupError as e:
         await callback.answer(str(e), show_alert=True)
         return
@@ -101,9 +100,8 @@ async def apply(callback: CallbackQuery, bot: Bot) -> None:
     delivered = await ui.notify(
         bot,
         app.owner.telegram_id,
-        f"Новая заявка в группу {escape(app.service.name)} {escape(app.service.plan_name)}\n"
-        f"От: {applicant}\n"
-        f"Свободных мест: {app.group.slots_free}",
+        f"Новая заявка в группу {escape(app.service.name)} {escape(app.service.plan_name)}: "
+        f"{applicant}\nСвободных мест: {app.group.slots_free}",
         keyboards.build(
             [
                 [

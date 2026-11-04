@@ -18,9 +18,9 @@ async def world_with_roles(sm):
     owner, _, group, (member, pending, stranger) = await make_world(
         sm, free=2, total=4, applicants=3
     )
-    app = await ms.apply_to_group(sm, group.id, member.id)
-    await ms.decide_application(sm, app.membership.id, owner.id, True)
-    await ms.apply_to_group(sm, group.id, pending.id)
+    app = await groups_svc.request_join(sm, group.id, member.id)
+    await groups_svc.approve_member(sm, app.membership.id, owner.id)
+    await groups_svc.request_join(sm, group.id, pending.id)
     return owner, group, member, pending, stranger
 
 
@@ -38,7 +38,7 @@ async def test_role_after_reject_and_leave_is_none(session_maker) -> None:
     owner, group, member, pending, _ = await world_with_roles(session_maker)
     async with session_maker() as s:
         m = await s.scalar(select(Membership).where(Membership.user_id == pending.id))
-    await ms.decide_application(session_maker, m.id, owner.id, False)
+    await groups_svc.reject_member(session_maker, m.id, owner.id)
     await ms.leave_group(session_maker, group.id, member.id)
     assert await groups_svc.get_user_role(session_maker, group.id, pending.id) == Role.NONE
     assert await groups_svc.get_user_role(session_maker, group.id, member.id) == Role.NONE

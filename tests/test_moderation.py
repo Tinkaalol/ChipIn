@@ -12,7 +12,6 @@ from bot.db.models import (
     User,
 )
 from bot.services import groups as groups_svc
-from bot.services import memberships as ms
 from bot.services import moderation as mod
 from tests.test_memberships import make_world, reload
 
@@ -28,9 +27,9 @@ async def test_find_user_by_username_is_case_and_at_insensitive(session_maker) -
 
 async def test_ban_closes_owned_groups_and_rejects_pending(session_maker) -> None:
     owner, _, group, (u1, u2) = await make_world(session_maker, free=2)
-    a1 = await ms.apply_to_group(session_maker, group.id, u1.id)
-    await ms.decide_application(session_maker, a1.membership.id, owner.id, True)
-    a2 = await ms.apply_to_group(session_maker, group.id, u2.id)
+    a1 = await groups_svc.request_join(session_maker, group.id, u1.id)
+    await groups_svc.approve_member(session_maker, a1.membership.id, owner.id)
+    a2 = await groups_svc.request_join(session_maker, group.id, u2.id)
 
     result = await mod.ban_user(session_maker, owner.id, protected_ids=set())
 
@@ -45,8 +44,8 @@ async def test_ban_closes_owned_groups_and_rejects_pending(session_maker) -> Non
 
 async def test_ban_removes_member_and_returns_slot(session_maker) -> None:
     owner, _, group, (u1, _) = await make_world(session_maker, free=1)
-    app = await ms.apply_to_group(session_maker, group.id, u1.id)
-    await ms.decide_application(session_maker, app.membership.id, owner.id, True)
+    app = await groups_svc.request_join(session_maker, group.id, u1.id)
+    await groups_svc.approve_member(session_maker, app.membership.id, owner.id)
     assert (await reload(session_maker, Group, group.id)).status == GroupStatus.FULL
 
     result = await mod.ban_user(session_maker, u1.id, protected_ids=set())
@@ -76,10 +75,10 @@ async def test_banned_user_cannot_apply_and_unban_restores(session_maker) -> Non
     await mod.ban_user(session_maker, u1.id, protected_ids=set())
     assert await mod.is_banned(session_maker, u1.telegram_id)
     with pytest.raises(groups_svc.GroupError, match="недоступна"):
-        await ms.apply_to_group(session_maker, group.id, u1.id)
+        await groups_svc.request_join(session_maker, group.id, u1.id)
     await mod.unban_user(session_maker, u1.id)
     assert not await mod.is_banned(session_maker, u1.telegram_id)
-    await ms.apply_to_group(session_maker, group.id, u1.id)
+    await groups_svc.request_join(session_maker, group.id, u1.id)
     with pytest.raises(groups_svc.GroupError, match="не забанен"):
         await mod.unban_user(session_maker, u1.id)
 
@@ -92,8 +91,8 @@ async def test_closed_group_is_not_in_search_after_ban(session_maker) -> None:
 
 async def _joined_world(sm):
     owner, service, group, (u1, u2) = await make_world(sm, free=2)
-    app = await ms.apply_to_group(sm, group.id, u1.id)
-    await ms.decide_application(sm, app.membership.id, owner.id, True)
+    app = await groups_svc.request_join(sm, group.id, u1.id)
+    await groups_svc.approve_member(sm, app.membership.id, owner.id)
     return owner, service, group, u1, u2
 
 

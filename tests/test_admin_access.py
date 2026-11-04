@@ -3,6 +3,7 @@ from sqlalchemy import select
 
 from bot.db.models import Report, ReportStatus, Service, User
 from bot.services import catalog
+from bot.services import groups as groups_svc
 from bot.services import moderation as mod
 from bot.services.ratelimit import RateLimiter
 from tests.conftest import ADMIN_ID
@@ -149,11 +150,9 @@ async def _make_report(sm, group_id: int, reporter_id: int, target_id: int) -> R
 
 
 async def test_member_reports_organizer_through_bot(dp, session_maker) -> None:
-    from bot.services import memberships as ms
-
     owner, _, group, (u1, _) = await make_world(session_maker, free=2)
-    app = await ms.apply_to_group(session_maker, group.id, u1.id)
-    await ms.decide_application(session_maker, app.membership.id, owner.id, True)
+    app = await groups_svc.request_join(session_maker, group.id, u1.id)
+    await groups_svc.approve_member(session_maker, app.membership.id, owner.id)
     bot, session = make_bot()
     member = u1.telegram_id
 
@@ -177,10 +176,8 @@ async def test_member_reports_organizer_through_bot(dp, session_maker) -> None:
 
 async def test_report_flow_back_and_cancel(dp, session_maker) -> None:
     owner, _, group, (u1, _) = await make_world(session_maker, free=2)
-    from bot.services import memberships as ms
-
-    app = await ms.apply_to_group(session_maker, group.id, u1.id)
-    await ms.decide_application(session_maker, app.membership.id, owner.id, True)
+    app = await groups_svc.request_join(session_maker, group.id, u1.id)
+    await groups_svc.approve_member(session_maker, app.membership.id, owner.id)
     bot, session = make_bot()
     member = u1.telegram_id
     await dp.feed_update(bot, callback_update(member, f"r:new:{group.id}:{owner.id}"))

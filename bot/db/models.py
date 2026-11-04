@@ -118,6 +118,8 @@ class Membership(Base):
         _enum(MembershipStatus), default=MembershipStatus.PENDING
     )
     joined_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # Когда организатор принял или отклонил заявку (от этого считается пауза перед повтором)
+    decided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
 class Report(Base):
