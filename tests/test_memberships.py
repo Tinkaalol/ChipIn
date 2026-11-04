@@ -189,7 +189,7 @@ async def test_members_list_owner_only(session_maker) -> None:
     await groups_svc.request_join(session_maker, group.id, u2.id)
     await groups_svc.approve_member(session_maker, app.membership.id, owner.id)
     members = await svc.list_members(session_maker, group.id, owner.id)
-    assert [m.id for m in members] == [u1.id]
+    assert [m.user.id for m in members] == [u1.id]
     with pytest.raises(groups_svc.GroupError):
         await svc.list_members(session_maker, group.id, u1.id)
 

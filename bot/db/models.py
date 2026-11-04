@@ -38,6 +38,7 @@ class MembershipStatus(enum.StrEnum):
     APPROVED = "approved"
     REJECTED = "rejected"
     LEFT = "left"
+    REMOVED = "removed"  # удалён организатором
 
 
 class ReportStatus(enum.StrEnum):
@@ -120,6 +121,10 @@ class Membership(Base):
     joined_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     # Когда организатор принял или отклонил заявку (от этого считается пауза перед повтором)
     decided_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    # Удаление участника организатором
+    removed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    removed_by: Mapped[int | None] = mapped_column(ForeignKey("users.id"))
+    removal_reason: Mapped[str | None] = mapped_column(Text)
 
 
 class Report(Base):

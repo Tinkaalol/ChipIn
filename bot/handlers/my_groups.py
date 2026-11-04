@@ -2,7 +2,9 @@ from datetime import date, datetime
 from html import escape
 
 from aiogram import Bot, F, Router
-from aiogram.types import CallbackQuery
+from aiogram.fsm.context import FSMContext
+from aiogram.fsm.state import State, StatesGroup
+from aiogram.types import CallbackQuery, Message
 
 from bot import keyboards, ui
 from bot.db.models import GroupStatus, MembershipStatus, User
@@ -22,6 +24,9 @@ CLOSE = "g:close:"
 CLOSE_OK = "g:closeok:"
 LEAVE = "g:leave:"
 LEAVE_OK = "g:leaveok:"
+REMOVE = "g:rm:"  # g:rm:<membership_id>
+REMOVE_OK = "g:rmok:"
+REMOVE_SKIP = "g:rmskip"
 REPORT = "r:new:"  # r:new:<group_id>:<user_id>
 APPLICATION_DECIDE_PREFIX = "m:"  # m:ok:<membership_id> / m:no:<membership_id>
 
@@ -148,23 +153,121 @@ async def render_card(callback: CallbackQuery, group_id: int, list_page: int | N
     await ui.show(callback, text, keyboards.build(rows), html=True)
 
 
-@router.callback_query(F.data.startswith(MEMBERS))
-async def show_members(callback: CallbackQuery) -> None:
-    group_id = _gid(callback, MEMBERS)
+class RemoveFlow(StatesGroup):
+    reason = State()
+
+
+async def render_members(callback: CallbackQuery, group_id: int) -> None:
     try:
         members = await svc.list_members(session_maker, group_id, await _current_user_id(callback))
     except groups_svc.GroupError as e:
         await callback.answer(str(e), show_alert=True)
         return
     if members:
-        listing = "\n".join(f"• {contact_html(m.telegram_id, m.username)}" for m in members)
+        listing = "\n".join(
+            f"• {contact_html(m.user.telegram_id, m.user.username)}" for m in members
+        )
         text = f"Участники группы:\n{listing}"
-        rows = [[(f"Пожаловаться на {_label(m)}", f"{REPORT}{group_id}:{m.id}")] for m in members]
+        rows = [
+            [
+                (f"Удалить {_short(m.user)}", f"{REMOVE}{m.membership_id}"),
+                ("Пожаловаться", f"{REPORT}{group_id}:{m.user.id}"),
+            ]
+            for m in members
+        ]
     else:
         text = "Пока нет принятых участников."
         rows = []
     rows.append(_back_to_group(group_id))
     await ui.show(callback, text, keyboards.build(rows), html=True)
+
+
+@router.callback_query(F.data.startswith(MEMBERS))
+async def show_members(callback: CallbackQuery) -> None:
+    await render_members(callback, _gid(callback, MEMBERS))
+
+
+def _short(user: User) -> str:
+    return f"@{user.username}" if user.username else "участника"
+
+
+@router.callback_query(F.data.startswith(REMOVE_OK))
+async def remove_confirmed(callback: CallbackQuery, bot: Bot, state: FSMContext) -> None:
+    try:
+        removal = await svc.remove_member(
+            session_maker, _gid(callback, REMOVE_OK), await _current_user_id(callback)
+        )
+    except groups_svc.GroupError as e:
+        await callback.answer(str(e), show_alert=True)
+        return
+    title = f"{removal.service.name} {removal.service.plan_name}"
+    complaint = [("Пожаловаться на организатора", f"{REPORT}{removal.group.id}:{removal.owner.id}")]
+    await ui.notify(
+        bot,
+        removal.member.telegram_id,
+        f"Организатор удалил вас из группы {title}.",
+        keyboards.build([complaint]),
+    )
+    await state.set_state(RemoveFlow.reason)
+    await state.update_data(membership_id=removal.membership.id, group_id=removal.group.id)
+    text = (
+        f"{_short(removal.member).capitalize()} удалён из группы, ему отправлено уведомление.\n"
+        "Если хотите, напишите причину — я передам её. Это необязательно."
+    )
+    await ui.show(callback, text, keyboards.build([[("Без причины", REMOVE_SKIP)]]))
+
+
+@router.callback_query(F.data == REMOVE_SKIP, RemoveFlow.reason)
+async def remove_without_reason(callback: CallbackQuery, state: FSMContext) -> None:
+    group_id = (await state.get_data())["group_id"]
+    await state.clear()
+    await render_members(callback, group_id)
+
+
+@router.message(RemoveFlow.reason, F.text, ~F.text.startswith("/"))
+async def removal_reason(message: Message, state: FSMContext, bot: Bot) -> None:
+    if message.from_user is None:
+        return
+    data = await state.get_data()
+    user = await register_user(session_maker, message.from_user.id, message.from_user.username)
+    try:
+        removal = await svc.set_removal_reason(
+            session_maker, data["membership_id"], user.id, message.text or ""
+        )
+    except groups_svc.GroupError as e:
+        await message.answer(str(e), reply_markup=keyboards.build([[("Без причины", REMOVE_SKIP)]]))
+        return
+    await state.clear()
+    title = f"{removal.service.name} {removal.service.plan_name}"
+    await ui.notify(
+        bot,
+        removal.member.telegram_id,
+        f"Причина удаления из группы {title}: {removal.membership.removal_reason}",
+    )
+    await message.answer(
+        "Причина передана.",
+        reply_markup=keyboards.build([[("« К участникам", f"{MEMBERS}{removal.group.id}")]]),
+    )
+
+
+@router.callback_query(F.data.startswith(REMOVE))
+async def remove_ask(callback: CallbackQuery) -> None:
+    membership_id = _gid(callback, REMOVE)
+    try:
+        removal = await svc.get_removable_member(
+            session_maker, membership_id, await _current_user_id(callback)
+        )
+    except groups_svc.GroupError as e:
+        await callback.answer(str(e), show_alert=True)
+        return
+    who = f"@{removal.member.username}" if removal.member.username else "этого участника"
+    rows = [
+        [("Да, удалить", f"{REMOVE_OK}{membership_id}")],
+        [("Отмена", f"{MEMBERS}{removal.group.id}")],
+    ]
+    await ui.show(
+        callback, f"Удалить {who} из группы? Он получит уведомление.", keyboards.build(rows)
+    )
 
 
 @router.callback_query(F.data.startswith(CLOSE_OK))

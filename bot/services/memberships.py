@@ -1,12 +1,14 @@
 from dataclasses import dataclass
+from datetime import UTC, datetime
 
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from bot.db.models import Group, GroupStatus, Membership, MembershipStatus, Service, User
-from bot.services.groups import GroupError, Role, SessionMaker, role_in_session
+from bot.services.groups import GroupError, Role, SessionMaker, lock_group, role_in_session
 
 MAX_SHOWN_APPLICANTS = 10
+MAX_REMOVAL_REASON = 300
 ACTIVE = (MembershipStatus.PENDING, MembershipStatus.APPROVED)
 
 
@@ -52,13 +54,18 @@ class GroupCard:
     applicants: list[Applicant]  # ждущие заявки: только организатору
 
 
-async def release_membership(session: AsyncSession, membership: Membership) -> Group:
-    """Помечает участие как LEFT; принятому участнику возвращает место в группе."""
+async def release_membership(
+    session: AsyncSession,
+    membership: Membership,
+    status: MembershipStatus = MembershipStatus.LEFT,
+    **values: object,
+) -> Group:
+    """Переводит участие в `status` (по умолчанию LEFT); принятому возвращает место в группе."""
     was_approved = membership.status == MembershipStatus.APPROVED
     result = await session.execute(
         update(Membership)
         .where(Membership.id == membership.id, Membership.status == membership.status)
-        .values(status=MembershipStatus.LEFT)
+        .values(status=status, **values)
     )
     if result.rowcount == 0:
         raise GroupError("Статус участия уже изменился, попробуйте ещё раз.")
@@ -192,15 +199,107 @@ async def get_group_card(
         return GroupCard(group, service, role, owner, participants, applicants)  # type: ignore[arg-type]
 
 
-async def list_members(session_maker: SessionMaker, group_id: int, owner_id: int) -> list[User]:
+@dataclass
+class MemberEntry:
+    membership_id: int
+    user: User
+
+
+async def list_members(
+    session_maker: SessionMaker, group_id: int, owner_id: int
+) -> list[MemberEntry]:
     async with session_maker() as session:
         group = await session.get(Group, group_id)
         if group is None or group.owner_id != owner_id:
             raise GroupError("Это не ваша группа.")
-        rows = await session.scalars(
-            select(User)
-            .join(Membership, Membership.user_id == User.id)
+        rows = await session.execute(
+            select(Membership.id, User)
+            .join(User, Membership.user_id == User.id)
             .where(Membership.group_id == group_id, Membership.status == MembershipStatus.APPROVED)
-            .order_by(Membership.joined_at)
+            .order_by(Membership.joined_at, Membership.id)
         )
-        return list(rows)
+        return [MemberEntry(mid, user) for mid, user in rows]
+
+
+@dataclass
+class Removal:
+    membership: Membership
+    group: Group
+    service: Service
+    member: User
+    owner: User
+
+
+async def _removal_context(session: AsyncSession, membership: Membership, group: Group) -> Removal:
+    member = await session.get(User, membership.user_id)
+    owner = await session.get(User, group.owner_id)
+    service = await session.get(Service, group.service_id)
+    return Removal(membership, group, service, member, owner)  # type: ignore[arg-type]
+
+
+async def get_removable_member(
+    session_maker: SessionMaker, membership_id: int, owner_id: int
+) -> Removal:
+    """Проверяет на сервере, что организатор может удалить именно этого участника."""
+    async with session_maker() as session:
+        membership = await session.get(Membership, membership_id)
+        if membership is None:
+            raise GroupError("Участник не найден.")
+        group = await session.get(Group, membership.group_id)
+        if group is None or group.owner_id != owner_id:
+            raise GroupError("Это не ваша группа.")
+        _check_removable(membership, owner_id)
+        return await _removal_context(session, membership, group)
+
+
+def _check_removable(membership: Membership, owner_id: int) -> None:
+    if membership.user_id == owner_id:
+        raise GroupError("Себя из своей группы удалить нельзя.")
+    if membership.status != MembershipStatus.APPROVED:
+        raise GroupError("Этого пользователя нет в группе.")
+
+
+async def remove_member(session_maker: SessionMaker, membership_id: int, owner_id: int) -> Removal:
+    """Организатор удаляет участника: место освобождается, группа из full снова open."""
+    async with session_maker() as session, session.begin():
+        membership = await session.get(Membership, membership_id)
+        if membership is None:
+            raise GroupError("Участник не найден.")
+        group = await lock_group(session, membership.group_id)
+        if group is None or group.owner_id != owner_id:
+            raise GroupError("Это не ваша группа.")
+        await session.refresh(membership)  # статус после блокировки: повторное удаление не пройдёт
+        _check_removable(membership, owner_id)
+        group = await release_membership(
+            session,
+            membership,
+            MembershipStatus.REMOVED,
+            removed_at=datetime.now(UTC),
+            removed_by=owner_id,
+        )
+        await session.refresh(membership)
+        return await _removal_context(session, membership, group)
+
+
+async def set_removal_reason(
+    session_maker: SessionMaker, membership_id: int, owner_id: int, reason: str
+) -> Removal:
+    """Необязательная причина, указанная после удаления; её увидит удалённый участник."""
+    reason = reason.strip()
+    if not reason:
+        raise GroupError("Причина не может быть пустой.")
+    if len(reason) > MAX_REMOVAL_REASON:
+        raise GroupError(f"Причина слишком длинная, максимум {MAX_REMOVAL_REASON} символов.")
+    async with session_maker() as session, session.begin():
+        membership = await session.get(Membership, membership_id)
+        if (
+            membership is None
+            or membership.status != MembershipStatus.REMOVED
+            or membership.removed_by != owner_id
+        ):
+            raise GroupError("Причину можно указать только для участника, удалённого вами.")
+        if membership.removal_reason is not None:
+            raise GroupError("Причина уже указана.")
+        membership.removal_reason = reason
+        group = await session.get(Group, membership.group_id)
+        return await _removal_context(session, membership, group)  # type: ignore[arg-type]

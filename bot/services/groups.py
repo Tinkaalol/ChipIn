@@ -16,6 +16,7 @@ from bot.db.models import Group, GroupStatus, Membership, MembershipStatus, Serv
 MAX_OPEN_GROUPS = 3
 PAGE_SIZE = 5
 REAPPLY_DELAY = timedelta(hours=24)  # пауза перед повторной заявкой после отказа
+REMOVED_REAPPLY_DELAY = timedelta(days=7)  # то же после удаления из группы
 BILLING_DAY_MIN = 1
 BILLING_DAY_MAX = 28
 CENT = Decimal("0.01")
@@ -165,13 +166,19 @@ async def list_owned_groups(
 def _visible_to(viewer_id: int) -> list[ColumnElement[bool]]:
     """Условия поиска: открытые группы со свободными местами, кроме своих и тех, где
     пользователь уже состоит, ждёт ответа или получил отказ."""
-    cutoff = datetime.now(UTC) - REAPPLY_DELAY
+    now = datetime.now(UTC)
+    cutoff = now - REAPPLY_DELAY
+    removed_cutoff = now - REMOVED_REAPPLY_DELAY
     already_involved = exists().where(
         Membership.group_id == Group.id,
         Membership.user_id == viewer_id,
         or_(
             Membership.status.in_((MembershipStatus.PENDING, MembershipStatus.APPROVED)),
             and_(Membership.status == MembershipStatus.REJECTED, Membership.decided_at > cutoff),
+            and_(
+                Membership.status == MembershipStatus.REMOVED,
+                Membership.removed_at > removed_cutoff,
+            ),
         ),
     )
     return [
@@ -288,6 +295,7 @@ async def request_join(
         if active == MembershipStatus.PENDING:
             raise GroupError("Вы уже подали заявку, ждите ответа организатора.")
         await _check_reapply_delay(session, group_id, applicant_id)
+        await _check_removal_delay(session, group_id, applicant_id)
         membership = Membership(group_id=group_id, user_id=applicant_id)
         session.add(membership)
         try:
@@ -316,7 +324,25 @@ async def _check_reapply_delay(session: AsyncSession, group_id: int, applicant_i
         raise GroupError(f"Организатор отклонил вашу заявку. Подать новую можно через {hours} ч.")
 
 
-async def _lock_group(session: AsyncSession, group_id: int) -> Group | None:
+async def _check_removal_delay(session: AsyncSession, group_id: int, applicant_id: int) -> None:
+    removed_at = await session.scalar(
+        select(func.max(Membership.removed_at)).where(
+            Membership.group_id == group_id,
+            Membership.user_id == applicant_id,
+            Membership.status == MembershipStatus.REMOVED,
+        )
+    )
+    if removed_at is None:
+        return
+    wait = _as_utc(removed_at) + REMOVED_REAPPLY_DELAY - datetime.now(UTC)
+    if wait > timedelta(0):
+        days = math.ceil(wait.total_seconds() / 86400)
+        raise GroupError(
+            f"Организатор удалил вас из этой группы. Подать заявку снова можно через {days} дн."
+        )
+
+
+async def lock_group(session: AsyncSession, group_id: int) -> Group | None:
     """Блокирует строку группы до конца транзакции.
 
     PostgreSQL: SELECT ... FOR UPDATE. SQLite его не поддерживает, поэтому там берём
@@ -335,7 +361,7 @@ async def _decide(
         membership = await session.get(Membership, membership_id)
         if membership is None:
             raise GroupError("Заявка не найдена.")
-        group = await _lock_group(session, membership.group_id)
+        group = await lock_group(session, membership.group_id)
         if group is None or group.owner_id != actor_id:
             raise GroupError("Это не ваша группа.")
         await session.refresh(membership)  # статус после получения блокировки, а не до неё

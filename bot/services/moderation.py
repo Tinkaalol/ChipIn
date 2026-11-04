@@ -148,6 +148,21 @@ async def _participant_ids(session: AsyncSession, group: Group) -> set[int]:
     return {group.owner_id, *rows}
 
 
+async def _was_removed_by(
+    session: AsyncSession, group_id: int, user_id: int, remover_id: int
+) -> bool:
+    """Удалённый участник вправе пожаловаться на организатора, который его удалил."""
+    found = await session.scalar(
+        select(Membership.id).where(
+            Membership.group_id == group_id,
+            Membership.user_id == user_id,
+            Membership.status == MembershipStatus.REMOVED,
+            Membership.removed_by == remover_id,
+        )
+    )
+    return found is not None
+
+
 async def create_report(
     session_maker: SessionMaker,
     reporter_id: int,
@@ -171,7 +186,10 @@ async def create_report(
         if group is None:
             raise GroupError("Группа не найдена.")
         participants = await _participant_ids(session, group)
-        if reporter_id not in participants or target_id not in participants:
+        removed_by_target = await _was_removed_by(session, group_id, reporter_id, target_id)
+        if target_id not in participants or (
+            reporter_id not in participants and not removed_by_target
+        ):
             raise GroupError("Пожаловаться можно только на участника своей группы.")
         duplicate = await session.scalar(
             select(Report.id).where(
