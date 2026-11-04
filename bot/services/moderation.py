@@ -13,7 +13,7 @@ from bot.db.models import (
     Service,
     User,
 )
-from bot.services.groups import GroupError, SessionMaker
+from bot.services.groups import GroupError, SessionMaker, lock_group
 from bot.services.memberships import ACTIVE, close_in_session, release_membership
 
 REASONS = {
@@ -96,10 +96,26 @@ async def ban_user(session_maker: SessionMaker, user_id: int, protected_ids: set
             raise GroupError("Администратора забанить нельзя.")
         if user.is_banned:
             raise AlreadyBannedError("Пользователь уже забанен.")
+        # Блокируем все затрагиваемые группы по возрастанию id: единый порядок защищает
+        # от deadlock с параллельными принятиями, выходами и другими банами
+        for group_id in await _affected_group_ids(session, user.id):
+            await lock_group(session, group_id)
         user.is_banned = True
         closed = await _close_owned_groups(session, user.id)
         left = await _leave_joined_groups(session, user.id)
         return BanResult(user, closed, left)
+
+
+async def _affected_group_ids(session: AsyncSession, user_id: int) -> list[int]:
+    owned = await session.scalars(
+        select(Group.id).where(Group.owner_id == user_id, Group.status != GroupStatus.CLOSED)
+    )
+    joined = await session.scalars(
+        select(Membership.group_id).where(
+            Membership.user_id == user_id, Membership.status.in_(ACTIVE)
+        )
+    )
+    return sorted({*owned, *joined})
 
 
 async def _close_owned_groups(session: AsyncSession, user_id: int) -> list[ClosedGroup]:

@@ -85,6 +85,9 @@ async def release_membership(
 async def leave_group(session_maker: SessionMaker, group_id: int, user_id: int) -> Departure:
     """Выход участника или отзыв заявки. Место возвращается, если участник был принят."""
     async with session_maker() as session, session.begin():
+        # Везде порядок блокировок один: сначала строка группы, потом строки участий.
+        # Иначе параллельные принятие и выход блокируют друг друга (deadlock в PostgreSQL).
+        await lock_group(session, group_id)
         membership = await session.scalar(
             select(Membership).where(
                 Membership.group_id == group_id,
@@ -121,7 +124,7 @@ async def close_in_session(session: AsyncSession, group: Group) -> list[int]:
 
 async def close_group(session_maker: SessionMaker, group_id: int, owner_id: int) -> Closure:
     async with session_maker() as session, session.begin():
-        group = await session.get(Group, group_id)
+        group = await lock_group(session, group_id)
         if group is None or group.owner_id != owner_id:
             raise GroupError("Это не ваша группа.")
         if group.status == GroupStatus.CLOSED:

@@ -291,6 +291,10 @@ async def close_confirmed(callback: CallbackQuery, bot: Bot) -> None:
 @router.callback_query(F.data.startswith(CLOSE))
 async def close_ask(callback: CallbackQuery) -> None:
     group_id = _gid(callback, CLOSE)
+    role = await groups_svc.get_user_role(session_maker, group_id, await _current_user_id(callback))
+    if role != Role.OWNER:
+        await callback.answer("Это не ваша группа.", show_alert=True)
+        return
     rows = [[("Да, закрыть", f"{CLOSE_OK}{group_id}")], _back_to_group(group_id)]
     text = "Закрыть группу? Новые заявки приниматься не будут, участники получат уведомление."
     await ui.show(callback, text, keyboards.build(rows))
@@ -321,6 +325,10 @@ async def leave_confirmed(callback: CallbackQuery, bot: Bot) -> None:
 @router.callback_query(F.data.startswith(LEAVE))
 async def leave_ask(callback: CallbackQuery) -> None:
     group_id = _gid(callback, LEAVE)
+    role = await groups_svc.get_user_role(session_maker, group_id, await _current_user_id(callback))
+    if role not in (Role.MEMBER, Role.PENDING):
+        await callback.answer("Вы не состоите в этой группе.", show_alert=True)
+        return
     rows = [[("Да, выйти", f"{LEAVE_OK}{group_id}")], _back_to_group(group_id)]
     await ui.show(callback, "Точно выйти из группы?", keyboards.build(rows))
 

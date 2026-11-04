@@ -2,7 +2,8 @@ from collections.abc import Awaitable, Callable
 from typing import Any
 
 from aiogram import BaseMiddleware
-from aiogram.types import TelegramObject, Update
+from aiogram.fsm.context import FSMContext
+from aiogram.types import CallbackQuery, TelegramObject, Update
 
 from bot.services.groups import SessionMaker
 from bot.services.moderation import is_banned
@@ -31,3 +32,29 @@ class BanMiddleware(BaseMiddleware):
             elif event.message is not None:
                 await event.message.answer(BANNED_TEXT)
         return None
+
+
+# Состояния, где бот ждёт свободный текст, и кнопки, которые к ним относятся.
+# Любая другая кнопка означает, что человек ушёл из диалога: состояние сбрасывается,
+# иначе его следующее сообщение боту ушло бы как причина удаления, жалоба или цена.
+TEXT_STATES: dict[str, tuple[str, ...]] = {
+    "ReportFlow:comment": ("r:",),
+    "RemoveFlow:reason": ("g:rmskip",),
+    "AdminFlow:add_service": ("a:svc:",),
+    "AdminFlow:edit_price": ("a:svc:",),
+}
+
+
+class TextStateGuard(BaseMiddleware):
+    async def __call__(
+        self,
+        handler: Callable[[TelegramObject, dict[str, Any]], Awaitable[Any]],
+        event: TelegramObject,
+        data: dict[str, Any],
+    ) -> Any:
+        state: FSMContext | None = data.get("state")
+        if state is not None and isinstance(event, CallbackQuery):
+            allowed = TEXT_STATES.get(await state.get_state() or "")
+            if allowed is not None and not (event.data or "").startswith(allowed):
+                await state.clear()
+        return await handler(event, data)
