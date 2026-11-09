@@ -1,0 +1,52 @@
+{% extends "base.html" %}
+{% block title %}{{ card.service.name }}{% endblock %}
+{% block content %}
+{% set g = card.group %}
+<h1>{{ card.service.name }} · {{ card.service.plan_name }}</h1>
+<p><strong>{{ g.price_per_member | money(card.service.currency) }}</strong> в месяц с человека. Оплата {{ g.billing_day }}-го числа.</p>
+<p>Мест: {{ g.slots_total - g.slots_free }} занято из {{ g.slots_total }}, свободно {{ g.slots_free }}.</p>
+
+{% macro post(url, label, css="btn", extra="") %}
+  <form method="post" action="{{ url }}" class="inline" hx-boost="false">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    {{ extra | safe }}
+    <button class="{{ css }}">{{ label }}</button>
+  </form>
+{% endmacro %}
+
+{% if card.role.value == "none" %}
+  {{ post("/groups/%d/join" % g.id, "Подать заявку") }}
+  <p class="muted">Контакт организатора откроется после одобрения заявки.</p>
+{% elif card.role.value == "pending" %}
+  <p class="tag">Заявка отправлена, ждите ответа организатора.</p>
+{% elif card.role.value == "member" %}
+  <h2>Контакт организатора</h2>
+  <p>{% if card.owner.username %}<a href="https://t.me/{{ card.owner.username }}">@{{ card.owner.username }}</a>{% else %}<a href="tg://user?id={{ card.owner.telegram_id }}">профиль в Telegram</a>{% endif %}</p>
+  <p class="muted">Об оплате и доступе договаривайтесь напрямую. Не пересылайте пароли и данные карт через сайт.</p>
+  {{ post("/groups/%d/leave" % g.id, "Выйти из группы", "btn danger") }}
+{% else %}
+  <p class="tag">Вы организатор</p>
+  {% if card.applicants %}
+    <h2>Заявки</h2>
+    <ul class="cards">
+    {% for a in card.applicants %}
+      <li class="card">
+        <span>{% if a.user.username %}@{{ a.user.username }}{% else %}Пользователь {{ a.user.telegram_id }}{% endif %}</span>
+        {{ post("/groups/%d/applications/%d" % (g.id, a.membership_id), "Принять", "btn", '<input type="hidden" name="decision" value="approve">') }}
+        {{ post("/groups/%d/applications/%d" % (g.id, a.membership_id), "Отклонить", "btn alt", '<input type="hidden" name="decision" value="reject">') }}
+      </li>
+    {% endfor %}
+    </ul>
+  {% endif %}
+  {{ post("/groups/%d/close" % g.id, "Закрыть группу", "btn danger") }}
+{% endif %}
+
+{% if card.participants %}
+  <h2>Участники</h2>
+  <ul>
+  {% for p in card.participants %}
+    <li>{% if p.username %}@{{ p.username }}{% else %}Участник{% endif %}</li>
+  {% endfor %}
+  </ul>
+{% endif %}
+{% endblock %}

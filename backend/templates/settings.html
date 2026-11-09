@@ -1,0 +1,16 @@
+{% extends "base.html" %}
+{% block title %}Настройки{% endblock %}
+{% block content %}
+<h1>Настройки</h1>
+<p>Telegram: {% if user.username %}@{{ user.username }}{% else %}без username (ID {{ user.telegram_id }}){% endif %}. Данные берутся из Telegram при входе.</p>
+<form method="post" action="/settings" class="form" hx-boost="false">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+  <label>Язык
+    <select name="language">
+      {% for code in languages %}<option value="{{ code }}" {{ 'selected' if user.language == code }}>{{ {'ru': 'Русский', 'kk': 'Қазақша', 'en': 'English'}[code] }}</option>{% endfor %}
+    </select>
+  </label>
+  <p class="muted">Пока интерфейс только на русском, выбор сохранится для будущих версий.</p>
+  <button class="btn">Сохранить</button>
+</form>
+{% endblock %}

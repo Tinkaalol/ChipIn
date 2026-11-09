@@ -1,18 +1,11 @@
-from decimal import Decimal
 from html import escape
 
-from shared.db.models import DEFAULT_CURRENCY
+from shared.formatting import money as money
 
 WELCOME = (
     "Привет! Я помогу найти компанию для совместной оплаты подписок.\n"
     "Деньги я не принимаю: участники переводят их друг другу сами."
 )
-
-CURRENCY_SIGNS = {"KZT": "₸"}
-
-
-def money(amount: Decimal | str, currency: str = DEFAULT_CURRENCY) -> str:
-    return f"{Decimal(amount):.2f} {CURRENCY_SIGNS.get(currency, currency)}"
 
 
 def contact_html(telegram_id: int, username: str | None) -> str:

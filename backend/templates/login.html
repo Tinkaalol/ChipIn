@@ -1,0 +1,14 @@
+{% extends "base.html" %}
+{% block title %}Вход{% endblock %}
+{% block content %}
+<h1>Вход</h1>
+{% if error %}<p class="flash error" role="alert">{{ error }}</p>{% endif %}
+<p>Войдите через Telegram. Пароль не нужен, а аккаунт создаётся при первом входе.</p>
+{% if bot_username %}
+  <script async src="https://telegram.org/js/telegram-widget.js?22"
+          data-telegram-login="{{ bot_username }}" data-size="large"
+          data-auth-url="{{ auth_url }}" data-request-access="write"></script>
+{% else %}
+  <p class="flash error">Вход не настроен: задайте BOT_USERNAME.</p>
+{% endif %}
+{% endblock %}

@@ -37,3 +37,18 @@ async def register_user(
             user.username = username
             await session.commit()
         return user
+
+
+LANGUAGES = ("ru", "kk", "en")
+
+
+async def set_language(
+    session_maker: async_sessionmaker[AsyncSession], user_id: int, language: str
+) -> None:
+    if language not in LANGUAGES:
+        raise ValueError("Неизвестный язык.")
+    async with session_maker() as session:
+        user = await session.get(User, user_id)
+        if user is not None:
+            user.language = language
+            await session.commit()

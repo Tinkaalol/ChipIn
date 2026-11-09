@@ -1,0 +1,13 @@
+{% extends "base.html" %}
+{% block content %}
+<section class="hero">
+  <h1>Делите подписки с другими людьми</h1>
+  <p>Найдите группу для Netflix, Spotify и других сервисов или создайте свою. Сайт знакомит участников и напоминает о дате оплаты, но денег не принимает и паролей не хранит.</p>
+  {% if user %}
+    <a class="btn" href="/groups">Смотреть группы</a>
+    <a class="btn alt" href="/groups/new">Создать группу</a>
+  {% else %}
+    <a class="btn" href="/login">Войти через Telegram</a>
+  {% endif %}
+</section>
+{% endblock %}

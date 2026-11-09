@@ -25,6 +25,13 @@ uvicorn backend.main:app --reload  # backend
 
 Для быстрых опытов можно указать `DATABASE_URL=sqlite+aiosqlite:///./bot.db`.
 
+## Сайт
+
+Страницы: главная, вход, личный кабинет, список и карточка групп, создание группы, настройки.
+Вход через Telegram Login Widget, поэтому нужны `BOT_USERNAME` и домен, привязанный к боту
+(@BotFather → `/setdomain`), а виджет работает только на https. Для локальной проверки по http
+поставьте `COOKIE_SECURE=false`. Задайте также `SESSION_SECRET`.
+
 ## Деплой на Render
 
 Лучше всего подходит тип **Background Worker** (порт не нужен), команда запуска `python -m bot.main`.

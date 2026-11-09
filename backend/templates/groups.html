@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+{% block title %}Группы{% endblock %}
+{% block content %}
+<div class="row"><h1>Группы</h1><a class="btn" href="/groups/new">Создать группу</a></div>
+<div class="tabs">
+  {% for s in services %}
+    <a class="tab {{ 'on' if current and current.id == s.id }}" href="/groups?service={{ s.id }}">{{ s.name }} · {{ s.plan_name }} ({{ counts.get(s.id, 0) }})</a>
+  {% endfor %}
+</div>
+{% if not current %}
+  <p class="muted">Выберите сервис.</p>
+{% elif not groups %}
+  <p>Пока нет групп. <a href="/groups/new">Создайте свою</a>.</p>
+{% else %}
+  <ul class="cards">
+  {% for g in groups %}
+    <li class="card">
+      <a href="/groups/{{ g.id }}"><strong>{{ g.price_per_member | money(current.currency) }}</strong> в месяц</a>
+      <span>Свободно мест: {{ g.slots_free }} из {{ g.slots_total }}</span>
+      <span class="muted">Оплата {{ g.billing_day }}-го числа</span>
+    </li>
+  {% endfor %}
+  </ul>
+  <div class="row">
+    {% if page > 1 %}<a class="btn alt" href="/groups?service={{ current.id }}&page={{ page - 1 }}">← Назад</a>{% endif %}
+    {% if has_next %}<a class="btn alt" href="/groups?service={{ current.id }}&page={{ page + 1 }}">Далее →</a>{% endif %}
+  </div>
+{% endif %}
+{% endblock %}

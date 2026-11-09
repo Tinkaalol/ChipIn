@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+{% block title %}Новая группа{% endblock %}
+{% block content %}
+<h1>Создать группу</h1>
+<form method="post" action="/groups/new" class="form" hx-boost="false">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+  <label>Сервис и тариф
+    <select name="service_id" required>
+      {% for s in services %}
+        <option value="{{ s.id }}">{{ s.name }} · {{ s.plan_name }} — {{ s.price_month | money(s.currency) }}/мес, до {{ s.max_members }} чел.</option>
+      {% endfor %}
+    </select>
+  </label>
+  <label>Всего мест (с вами)<input type="number" name="slots_total" min="2" required></label>
+  <label>Свободно сейчас<input type="number" name="slots_free" min="1" required></label>
+  <label>День оплаты (1–28)<input type="number" name="billing_day" min="1" max="28" required></label>
+  <p class="muted">Цена для участника считается автоматически: цена тарифа делится на число мест.</p>
+  <button class="btn">Создать</button>
+</form>
+{% endblock %}

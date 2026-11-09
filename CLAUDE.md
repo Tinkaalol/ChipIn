@@ -20,7 +20,8 @@ Backend и бот НЕ импортируют друг друга: общий к
 ## Структура
 ```
 shared/        общий код: config.py, db/ (models, session), services/ (groups, memberships, moderation, catalog, users)
-backend/       FastAPI (main.py): API сайта, использует shared
+backend/       FastAPI: main.py (приложение, JSON API), web.py (страницы), auth.py (проверка Telegram Login),
+               deps.py (сессия, CSRF), config.py, templates/ (Jinja2 + HTMX), static/
 bot/           aiogram: main.py, config.py (токен), handlers/, keyboards.py, middlewares.py, texts.py, ui.py,
                services/ (reminders, ratelimit: только то, что связано с Telegram)
 migrations/    Alembic (env.py берёт модели из shared.db.models)
@@ -39,6 +40,7 @@ docker-compose.yml, Dockerfile, .env.example
 users(id, telegram_id, username, language, is_banned, created_at); services(id, name, plan_name, price_month, currency, max_members, is_active); groups(id, service_id, owner_id, price_per_member, slots_total, slots_free, billing_day, status open/full/closed, created_at); memberships(id, group_id, user_id, status pending/approved/rejected/left/removed, joined_at); reports(id, reporter_id, target_user_id, group_id, reason, status).
 
 ## Правила
+- Сайт: вход только через Telegram Login Widget с серверной проверкой подписи (backend/auth.py); сессия в подписанном HttpOnly/Secure/SameSite=Lax cookie; каждый POST проверяет CSRF-токен. Доступ к данным проверяется на сервере по роли, шаблоны ничего не решают.
 - Интерфейс бота на русском, кнопки inline, у каждого шага диалога есть «Назад» и «Отмена».
 - Бизнес-логика только в shared/services (повторно в боте и backend не писать), хендлеры и роуты тонкие.
 - Бот никогда не хранит и не передаёт пароли, данные карт и доступы от сервисов.

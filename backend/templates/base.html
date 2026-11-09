@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}Складчина{% endblock %}</title>
+  <link rel="stylesheet" href="/static/style.css">
+  <script src="https://unpkg.com/htmx.org@1.9.12" defer></script>
+</head>
+<body hx-boost="true" hx-headers='{"X-CSRF-Token": "{{ csrf_token }}"}'>
+  <header class="top">
+    <a class="brand" href="/">Складчина</a>
+    <nav>
+      {% if user %}
+        <a href="/groups">Группы</a>
+        <a href="/cabinet">Кабинет</a>
+        <a href="/settings">Настройки</a>
+        <form method="post" action="/logout" hx-boost="false">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+          <button class="link">Выйти</button>
+        </form>
+      {% else %}
+        <a href="/login">Войти</a>
+      {% endif %}
+    </nav>
+  </header>
+  <main>
+    {% if flash %}<p class="flash" role="status">{{ flash }}</p>{% endif %}
+    {% block content %}{% endblock %}
+  </main>
+  <footer>Деньги здесь не принимаются: участники переводят их друг другу сами. Не пересылайте пароли и данные карт.</footer>
+</body>
+</html>
