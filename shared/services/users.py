@@ -4,7 +4,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from bot.db.models import User
+from shared.db.models import User
 
 logger = logging.getLogger(__name__)
 

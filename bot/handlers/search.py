@@ -4,12 +4,12 @@ from aiogram import Bot, F, Router
 from aiogram.types import CallbackQuery
 
 from bot import keyboards, ui
-from bot.db.session import session_maker
 from bot.handlers.my_groups import APPLICATION_DECIDE_PREFIX, render_card
-from bot.services import groups as groups_svc
 from bot.services.ratelimit import RATE_LIMIT_MESSAGE, application_limiter
-from bot.services.users import register_user
 from bot.texts import contact_html, money
+from shared.db.session import session_maker
+from shared.services import groups as groups_svc
+from shared.services.users import register_user
 
 router = Router(name="search")
 

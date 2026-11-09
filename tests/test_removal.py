@@ -3,10 +3,10 @@ from datetime import UTC, datetime, timedelta
 import pytest
 from sqlalchemy import select
 
-from bot.db.models import Group, GroupStatus, Membership, MembershipStatus, Report, User
-from bot.services import groups as groups_svc
-from bot.services import memberships as ms
-from bot.services import moderation as mod
+from shared.db.models import Group, GroupStatus, Membership, MembershipStatus, Report, User
+from shared.services import groups as groups_svc
+from shared.services import memberships as ms
+from shared.services import moderation as mod
 from tests.fakes import callback_update, make_bot, message_update
 from tests.test_memberships import make_world, reload
 
@@ -58,7 +58,7 @@ async def test_only_group_owner_can_remove(session_maker) -> None:
 async def _second_owner_group(sm):
     from decimal import Decimal
 
-    from bot.db.models import Service
+    from shared.db.models import Service
 
     async with sm() as s:
         other = User(telegram_id=900, username="other_owner")

@@ -2,8 +2,8 @@ from decimal import Decimal, InvalidOperation
 
 from sqlalchemy import select
 
-from bot.db.models import Service
-from bot.services.groups import GroupError, SessionMaker
+from shared.db.models import Service
+from shared.services.groups import GroupError, SessionMaker
 
 # ЦЕНЫ ПРИМЕРНЫЕ (тенге в месяц за весь тариф), перед запуском в прод сверить с сайтами сервисов.
 SERVICES: list[tuple[str, str, str, int]] = [

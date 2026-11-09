@@ -1,7 +1,7 @@
 from sqlalchemy import func, select
 
-from bot.db.models import User
-from bot.services.users import register_user
+from shared.db.models import User
+from shared.services.users import register_user
 
 
 async def test_creates_user(session_maker) -> None:

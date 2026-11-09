@@ -7,9 +7,9 @@ from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, Message, ReplyKeyboardRemove
 
 from bot import keyboards
-from bot.db.session import session_maker
-from bot.services.users import register_user
 from bot.texts import WELCOME
+from shared.db.session import session_maker
+from shared.services.users import register_user
 
 router = Router(name="start")
 

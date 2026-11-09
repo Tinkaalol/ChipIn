@@ -11,7 +11,7 @@ from sqlalchemy import ColumnElement, and_, exists, func, or_, select, text, upd
 from sqlalchemy.exc import IntegrityError, OperationalError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from bot.db.models import Group, GroupStatus, Membership, MembershipStatus, Service, User
+from shared.db.models import Group, GroupStatus, Membership, MembershipStatus, Service, User
 
 MAX_OPEN_GROUPS = 3
 PAGE_SIZE = 5

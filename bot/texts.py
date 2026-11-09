@@ -1,7 +1,7 @@
 from decimal import Decimal
 from html import escape
 
-from bot.db.models import DEFAULT_CURRENCY
+from shared.db.models import DEFAULT_CURRENCY
 
 WELCOME = (
     "Привет! Я помогу найти компанию для совместной оплаты подписок.\n"

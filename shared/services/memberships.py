@@ -4,8 +4,8 @@ from datetime import UTC, datetime
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from bot.db.models import Group, GroupStatus, Membership, MembershipStatus, Service, User
-from bot.services.groups import GroupError, Role, SessionMaker, lock_group, role_in_session
+from shared.db.models import Group, GroupStatus, Membership, MembershipStatus, Service, User
+from shared.services.groups import GroupError, Role, SessionMaker, lock_group, role_in_session
 
 MAX_SHOWN_APPLICANTS = 10
 MAX_REMOVAL_REASON = 300

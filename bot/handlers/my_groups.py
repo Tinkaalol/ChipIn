@@ -7,14 +7,14 @@ from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import CallbackQuery, Message
 
 from bot import keyboards, ui
-from bot.db.models import GroupStatus, MembershipStatus, User
-from bot.db.session import session_maker
-from bot.services import groups as groups_svc
-from bot.services import memberships as svc
-from bot.services.groups import Role
 from bot.services.reminders import ALMATY, next_payment_date
-from bot.services.users import register_user
 from bot.texts import contact_html, money
+from shared.db.models import GroupStatus, MembershipStatus, User
+from shared.db.session import session_maker
+from shared.services import groups as groups_svc
+from shared.services import memberships as svc
+from shared.services.groups import Role
+from shared.services.users import register_user
 
 router = Router(name="my_groups")
 

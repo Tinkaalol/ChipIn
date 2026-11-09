@@ -3,7 +3,7 @@ from dataclasses import dataclass
 from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from bot.db.models import (
+from shared.db.models import (
     Group,
     GroupStatus,
     Membership,
@@ -13,8 +13,8 @@ from bot.db.models import (
     Service,
     User,
 )
-from bot.services.groups import GroupError, SessionMaker, lock_group
-from bot.services.memberships import ACTIVE, close_in_session, release_membership
+from shared.services.groups import GroupError, SessionMaker, lock_group
+from shared.services.memberships import ACTIVE, close_in_session, release_membership
 
 REASONS = {
     "unpaid": "Не платит",

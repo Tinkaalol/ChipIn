@@ -6,8 +6,8 @@ from sqlalchemy import pool
 from sqlalchemy.engine import Connection
 from sqlalchemy.ext.asyncio import async_engine_from_config
 
-from bot.config import get_settings
-from bot.db.models import Base
+from shared.config import get_shared_settings
+from shared.db.models import Base
 
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.
@@ -25,7 +25,7 @@ if config.config_file_name is not None:
 target_metadata = Base.metadata
 
 # URL берём из .env, а не из alembic.ini
-config.set_main_option("sqlalchemy.url", get_settings().database_url)
+config.set_main_option("sqlalchemy.url", get_shared_settings().database_url)
 
 # other values from the config, defined by the needs of env.py,
 # can be acquired:

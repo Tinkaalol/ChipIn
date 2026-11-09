@@ -2,11 +2,11 @@ from datetime import date
 
 from sqlalchemy import select
 
-from bot.db.models import Group, GroupStatus, Membership, MembershipStatus
 from bot.handlers.my_groups import build_card
-from bot.services import groups as groups_svc
-from bot.services import memberships as ms
-from bot.services.groups import Role
+from shared.db.models import Group, GroupStatus, Membership, MembershipStatus
+from shared.services import groups as groups_svc
+from shared.services import memberships as ms
+from shared.services.groups import Role
 from tests.fakes import callback_update, make_bot
 from tests.test_memberships import make_world
 

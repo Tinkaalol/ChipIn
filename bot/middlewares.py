@@ -5,8 +5,8 @@ from aiogram import BaseMiddleware
 from aiogram.fsm.context import FSMContext
 from aiogram.types import CallbackQuery, TelegramObject, Update
 
-from bot.services.groups import SessionMaker
-from bot.services.moderation import is_banned
+from shared.services.groups import SessionMaker
+from shared.services.moderation import is_banned
 
 BANNED_TEXT = "Доступ к боту ограничен."
 

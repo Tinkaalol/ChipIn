@@ -4,13 +4,26 @@ Telegram-бот, который сводит людей для совместн�
 
 ## Запуск
 
+Всё сразу в Docker (PostgreSQL, миграции, backend на :8000, бот):
+
+```bash
+cp .env.example .env   # впишите BOT_TOKEN от @BotFather и свой Telegram ID в ADMIN_IDS
+docker compose up --build
+```
+
+Локально, без Docker для бота и backend:
+
 ```bash
 python3.12 -m venv .venv
 source .venv/bin/activate
 pip install -r requirements.txt
-cp .env.example .env   # впишите BOT_TOKEN от @BotFather и свой Telegram ID в ADMIN_IDS
-python -m bot.main
+docker compose up -d db          # PostgreSQL
+alembic upgrade head             # одни миграции на весь проект
+python -m bot.main               # бот
+uvicorn backend.main:app --reload  # backend
 ```
+
+Для быстрых опытов можно указать `DATABASE_URL=sqlite+aiosqlite:///./bot.db`.
 
 ## Деплой на Render
 
@@ -31,15 +44,16 @@ python -m bot.main
 ./dev.sh
 ```
 
-Бот перезапускается при каждом изменении `.py` файлов в `bot/` и `migrations/`. Остановка — Ctrl+C.
+Бот перезапускается при каждом изменении `.py` файлов в `bot/`, `shared/` и `migrations/`. Остановка — Ctrl+C.
 
 ## Проверки
 
 ```bash
 ruff check .
-pytest
+pytest                                  # SQLite в памяти
+TEST_DATABASE_URL=postgresql+asyncpg://postgres:postgres@localhost:5432/test pytest   # PostgreSQL
 ```
 
 ## Структура
 
-См. [CLAUDE.md](CLAUDE.md): `bot/handlers/` — тонкие хендлеры, `bot/services/` — бизнес-логика, `bot/db/` — модели и сессии, `migrations/` — Alembic.
+См. [CLAUDE.md](CLAUDE.md): `shared/` — модели и бизнес-логика групп (общий код), `bot/` — Telegram-бот, `backend/` — FastAPI, `migrations/` — Alembic.

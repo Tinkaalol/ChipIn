@@ -8,11 +8,11 @@ from aiogram.types import CallbackQuery, InlineKeyboardMarkup, Message
 
 from bot import keyboards, ui
 from bot.config import get_settings
-from bot.db.session import session_maker
-from bot.services import catalog
-from bot.services import groups as groups_svc
-from bot.services import moderation as mod
 from bot.texts import contact_html, money
+from shared.db.session import session_maker
+from shared.services import catalog
+from shared.services import groups as groups_svc
+from shared.services import moderation as mod
 
 router = Router(name="admin")
 

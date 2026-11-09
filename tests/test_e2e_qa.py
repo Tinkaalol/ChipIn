@@ -7,7 +7,8 @@ from datetime import datetime
 import pytest
 from sqlalchemy import func, select
 
-from bot.db.models import (
+from bot.services.reminders import ALMATY, next_payment_date
+from shared.db.models import (
     Group,
     GroupStatus,
     Membership,
@@ -16,11 +17,10 @@ from bot.db.models import (
     Service,
     User,
 )
-from bot.services import groups as groups_svc
-from bot.services import memberships as ms
-from bot.services import moderation as mod
-from bot.services.catalog import seed_services
-from bot.services.reminders import ALMATY, next_payment_date
+from shared.services import groups as groups_svc
+from shared.services import memberships as ms
+from shared.services import moderation as mod
+from shared.services.catalog import seed_services
 from tests.fakes import FakeSession, callback_update, make_bot, message_update
 
 ALICE, BOB, CAROL = 1001, 1002, 1003  # организатор и двое участников (telegram_id)
@@ -317,10 +317,18 @@ FORGED = [
 
 async def snapshot(sm):
     async with sm() as s:
-        groups = [(g.id, g.slots_free, g.status) for g in await s.scalars(select(Group))]
-        members = [(m.id, m.status) for m in await s.scalars(select(Membership))]
-        banned = [u.id for u in await s.scalars(select(User).where(User.is_banned.is_(True)))]
-        active = [x.is_active for x in await s.scalars(select(Service))]
+        groups = [
+            (g.id, g.slots_free, g.status)
+            for g in await s.scalars(select(Group).order_by(Group.id))
+        ]
+        members = [
+            (m.id, m.status) for m in await s.scalars(select(Membership).order_by(Membership.id))
+        ]
+        banned = [
+            u.id
+            for u in await s.scalars(select(User).where(User.is_banned.is_(True)).order_by(User.id))
+        ]
+        active = [x.is_active for x in await s.scalars(select(Service).order_by(Service.id))]
         reports = (await s.scalar(select(func.count()).select_from(Report))) or 0
     return groups, members, banned, active, reports
 

@@ -7,12 +7,12 @@ from aiogram.fsm.state import State, StatesGroup
 from aiogram.types import CallbackQuery, InlineKeyboardMarkup, Message
 
 from bot import keyboards
-from bot.db.models import DEFAULT_CURRENCY
-from bot.db.session import session_maker
-from bot.services import groups as svc
 from bot.services.ratelimit import RATE_LIMIT_MESSAGE, group_limiter
-from bot.services.users import register_user
 from bot.texts import WELCOME, money
+from shared.db.models import DEFAULT_CURRENCY
+from shared.db.session import session_maker
+from shared.services import groups as svc
+from shared.services.users import register_user
 
 router = Router(name="create_group")
 

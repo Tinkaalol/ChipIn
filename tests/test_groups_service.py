@@ -2,8 +2,8 @@ from decimal import Decimal
 
 import pytest
 
-from bot.db.models import GroupStatus, Service, User
-from bot.services import groups as svc
+from shared.db.models import GroupStatus, Service, User
+from shared.services import groups as svc
 
 
 def test_calc_price_exact() -> None:

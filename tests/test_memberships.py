@@ -4,10 +4,10 @@ from decimal import Decimal
 import pytest
 from sqlalchemy import select
 
-from bot.db.models import Base, Group, GroupStatus, Membership, MembershipStatus, Service, User
-from bot.db.session import make_engine, make_session_maker
-from bot.services import groups as groups_svc
-from bot.services import memberships as svc
+from shared.db.models import Base, Group, GroupStatus, Membership, MembershipStatus, Service, User
+from shared.db.session import make_engine, make_session_maker
+from shared.services import groups as groups_svc
+from shared.services import memberships as svc
 
 
 async def make_world(sm, free: int = 1, total: int = 3, applicants: int = 2):

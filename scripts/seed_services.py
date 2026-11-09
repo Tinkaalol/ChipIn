@@ -2,8 +2,8 @@
 
 import asyncio
 
-from bot.db.session import engine, session_maker
-from bot.services.catalog import seed_services
+from shared.db.session import engine, session_maker
+from shared.services.catalog import seed_services
 
 
 async def main() -> None:

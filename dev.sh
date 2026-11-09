@@ -4,4 +4,4 @@ set -euo pipefail
 cd "$(dirname "$0")"
 PY=".venv/bin/python"
 [ -x "$PY" ] || PY="python"
-exec "$PY" -m watchfiles --filter python "$PY -m bot.main" bot migrations
+exec "$PY" -m watchfiles --filter python "$PY -m bot.main" bot shared migrations

@@ -7,13 +7,13 @@ from alembic import command
 from alembic.config import Config
 
 from bot.config import get_settings
-from bot.db.session import engine, session_maker
 from bot.handlers import admin, create_group, errors, my_groups, report, search, start
 from bot.health import start_health_server
 from bot.middlewares import BanMiddleware, TextStateGuard
-from bot.services.catalog import seed_services
-from bot.services.groups import SessionMaker
 from bot.services.reminders import start_reminders
+from shared.db.session import engine, session_maker
+from shared.services.catalog import seed_services
+from shared.services.groups import SessionMaker
 
 
 def build_dispatcher(sm: SessionMaker = session_maker) -> Dispatcher:

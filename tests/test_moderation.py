@@ -1,7 +1,7 @@
 import pytest
 from sqlalchemy import select
 
-from bot.db.models import (
+from shared.db.models import (
     Group,
     GroupStatus,
     Membership,
@@ -11,8 +11,8 @@ from bot.db.models import (
     Service,
     User,
 )
-from bot.services import groups as groups_svc
-from bot.services import moderation as mod
+from shared.services import groups as groups_svc
+from shared.services import moderation as mod
 from tests.test_memberships import make_world, reload
 
 

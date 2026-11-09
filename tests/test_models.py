@@ -4,7 +4,7 @@ import pytest
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 
-from bot.db.models import Group, GroupStatus, Membership, MembershipStatus, Service, User
+from shared.db.models import Group, GroupStatus, Membership, MembershipStatus, Service, User
 
 
 async def test_create_full_chain(session_maker) -> None:

@@ -1,9 +1,9 @@
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 
-from bot.db.models import Group, GroupStatus, Membership, MembershipStatus, Service, User
-from bot.services import groups as svc
-from bot.services.catalog import seed_services
+from shared.db.models import Group, GroupStatus, Membership, MembershipStatus, Service, User
+from shared.services import groups as svc
+from shared.services.catalog import seed_services
 from tests.fakes import callback_update, make_bot
 from tests.test_memberships import make_world
 

@@ -10,10 +10,10 @@ from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
 from sqlalchemy import or_, select, update
 
-from bot.db.models import Group, GroupStatus, Membership, MembershipStatus, Service, User
-from bot.services.groups import SessionMaker
 from bot.texts import contact_html, money
 from bot.ui import notify
+from shared.db.models import Group, GroupStatus, Membership, MembershipStatus, Service, User
+from shared.services.groups import SessionMaker
 
 logger = logging.getLogger(__name__)
 

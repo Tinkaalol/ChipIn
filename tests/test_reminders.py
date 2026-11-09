@@ -6,8 +6,8 @@ from aiogram.exceptions import TelegramForbiddenError
 from aiogram.methods import SendMessage
 from sqlalchemy import select
 
-from bot.db.models import Group, GroupStatus, Membership, MembershipStatus, Service, User
 from bot.services import reminders as r
+from shared.db.models import Group, GroupStatus, Membership, MembershipStatus, Service, User
 
 
 @pytest.mark.parametrize(

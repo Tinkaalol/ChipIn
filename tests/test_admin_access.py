@@ -1,11 +1,11 @@
 import pytest
 from sqlalchemy import select
 
-from bot.db.models import Report, ReportStatus, Service, User
-from bot.services import catalog
-from bot.services import groups as groups_svc
-from bot.services import moderation as mod
 from bot.services.ratelimit import RateLimiter
+from shared.db.models import Report, ReportStatus, Service, User
+from shared.services import catalog
+from shared.services import groups as groups_svc
+from shared.services import moderation as mod
 from tests.conftest import ADMIN_ID
 from tests.fakes import callback_update, make_bot, message_update
 from tests.test_memberships import make_world
@@ -109,7 +109,7 @@ async def test_unbanned_user_can_start(dp, session_maker) -> None:
 
 
 async def test_catalog_validation(session_maker) -> None:
-    from bot.services.groups import GroupError
+    from shared.services.groups import GroupError
 
     with pytest.raises(GroupError):
         catalog.parse_price("abc")

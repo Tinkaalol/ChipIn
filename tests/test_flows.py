@@ -5,11 +5,11 @@ import logging
 
 from sqlalchemy import select
 
-from bot.db.models import Group, GroupStatus, Membership, MembershipStatus
-from bot.services import groups as groups_svc
-from bot.services.catalog import seed_services
 from bot.services.ratelimit import RateLimiter
-from bot.services.users import register_user
+from shared.db.models import Group, GroupStatus, Membership, MembershipStatus
+from shared.services import groups as groups_svc
+from shared.services.catalog import seed_services
+from shared.services.users import register_user
 from tests.fakes import callback_update, make_bot, message_update
 
 OWNER, PATIENT = 100, 200
@@ -187,7 +187,7 @@ async def test_my_groups_lists_both_roles(dp, session_maker) -> None:
 
 async def test_concurrent_first_start_creates_one_user(file_session_maker) -> None:
     await asyncio.gather(*[register_user(file_session_maker, 42, "same") for _ in range(8)])
-    from bot.db.models import User
+    from shared.db.models import User
 
     async with file_session_maker() as s:
         assert len((await s.scalars(select(User))).all()) == 1
@@ -236,7 +236,7 @@ async def test_start_registers_user_and_shows_menu(dp, session_maker) -> None:
     await dp.feed_update(bot, message_update(321, "/start", "newbie"))
     assert any("Привет" in t for t in session.texts())
     async with session_maker() as s:
-        from bot.db.models import User
+        from shared.db.models import User
 
         assert (await s.scalar(select(User).where(User.telegram_id == 321))).username == "newbie"
 

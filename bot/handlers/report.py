@@ -7,12 +7,12 @@ from aiogram.types import User as TgUser
 
 from bot import keyboards, ui
 from bot.config import get_settings
-from bot.db.session import session_maker
 from bot.handlers.my_groups import render_card
-from bot.services import groups as groups_svc
-from bot.services import moderation as mod
-from bot.services.users import register_user
 from bot.texts import WELCOME
+from shared.db.session import session_maker
+from shared.services import groups as groups_svc
+from shared.services import moderation as mod
+from shared.services.users import register_user
 
 router = Router(name="report")
 

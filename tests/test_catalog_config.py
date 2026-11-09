@@ -3,8 +3,8 @@ from decimal import Decimal
 import pytest
 
 from bot.config import Settings
-from bot.services import catalog
-from bot.services.groups import GroupError
+from shared.services import catalog
+from shared.services.groups import GroupError
 
 
 async def test_seed_is_idempotent(session_maker) -> None:
@@ -29,7 +29,7 @@ async def test_service_toggle_and_price(session_maker) -> None:
 
 
 async def groups_active(session_maker):
-    return await __import__("bot.services.groups", fromlist=["x"]).list_active_services(
+    return await __import__("shared.services.groups", fromlist=["x"]).list_active_services(
         session_maker
     )
 
