@@ -165,11 +165,13 @@ async def test_unreachable_organizer_does_not_break_application(dp, session_make
     await press(dp, bot, PATIENT, f"s:apply:{group.id}", "pat")
     assert "Заявка отправлена" in session.texts_to(PATIENT)[-1]
     stats = await flush_outbox(bot, session_maker)
-    assert stats["failed"] == 1  # бот заблокирован: повторять нет смысла
+    assert stats["skipped"] == 1  # бот заблокирован: повторять нет смысла
     async with session_maker() as s:
         assert await s.scalar(select(Membership)) is not None  # заявка сохранена
         row = await s.scalar(select(NotificationOutbox))
-    assert row.status == NotificationStatus.FAILED and "blocked" in row.error
+        organizer = await s.scalar(select(User).where(User.telegram_id == OWNER))
+    assert row.status == NotificationStatus.SKIPPED and "blocked" in row.error
+    assert organizer.notify_enabled is False
 
 
 async def test_unreachable_member_does_not_break_approval(dp, session_maker) -> None:
@@ -183,7 +185,7 @@ async def test_unreachable_member_does_not_break_approval(dp, session_maker) -> 
     await flush_outbox(bot, session_maker)
     async with session_maker() as s:
         statuses = [r.status for r in await s.scalars(select(NotificationOutbox))]
-    assert NotificationStatus.FAILED in statuses
+    assert NotificationStatus.SKIPPED in statuses
 
 
 async def test_applicant_without_telegram_notifications_is_told_to_contact(
@@ -308,7 +310,7 @@ async def test_rejection_is_polite_and_survives_blocked_member(dp, session_maker
     async with session_maker() as s:
         assert (await s.get(Membership, membership.id)).status == MembershipStatus.REJECTED
     assert "Отклонена" in session.texts_to(OWNER)[-1]
-    assert (await flush_outbox(bot, session_maker))["failed"] == 1  # заблокировал бота
+    assert (await flush_outbox(bot, session_maker))["skipped"] == 1  # заблокировал бота
 
     bot2, session2 = make_bot()
     group2 = await create_group_via_bot_second(dp, bot2, session_maker)

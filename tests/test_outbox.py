@@ -214,12 +214,15 @@ async def test_network_error_is_retried_with_backoff_then_fails(session_maker) -
     assert "boom" in event.error
 
 
-async def test_blocked_bot_fails_immediately_without_retries(session_maker) -> None:
+async def test_blocked_bot_skips_and_disables_notifications(session_maker) -> None:
     owner = await one_event(session_maker)
     bot = Bot(blocked={owner.telegram_id})
-    assert (await worker.process_outbox(bot, session_maker))["failed"] == 1  # type: ignore[arg-type]
+    assert (await worker.process_outbox(bot, session_maker))["skipped"] == 1  # type: ignore[arg-type]
     event = await only(session_maker)
-    assert event.status == NotificationStatus.FAILED and event.attempts == 1
+    assert event.status == NotificationStatus.SKIPPED and event.attempts == 1
+    assert "blocked" in event.error
+    async with session_maker() as s:
+        assert (await s.get(User, owner.id)).notify_enabled is False
 
 
 async def test_recipient_unlinked_after_enqueue_is_skipped_at_send_time(session_maker) -> None:
@@ -243,7 +246,7 @@ async def test_concurrent_workers_send_once(file_session_maker) -> None:
 
 async def test_stuck_event_is_retried_after_lease(session_maker) -> None:
     await one_event(session_maker)
-    assert await worker._claim(session_maker, (await only(session_maker)).id)
+    assert len(await worker.claim_batch(session_maker)) == 1
     bot = Bot()
     # воркер «упал» после claim: пока аренда не истекла, событие не берут
     assert not any((await worker.process_outbox(bot, session_maker)).values())  # type: ignore[arg-type]

@@ -10,7 +10,7 @@ from bot.config import get_settings
 from bot.handlers import admin, create_group, errors, my_groups, report, search, start
 from bot.health import start_health_server
 from bot.middlewares import BanMiddleware, TextStateGuard
-from bot.outbox import run_outbox
+from bot.outbox import SHUTDOWN_TIMEOUT, run_outbox
 from bot.services.reminders import start_reminders
 from shared.db.session import engine, session_maker
 from shared.services.catalog import seed_services
@@ -52,11 +52,18 @@ async def main() -> None:
     logging.getLogger(__name__).info("Бот запущен (long polling)")
     health = await start_health_server()
     scheduler = start_reminders(session_maker)
-    outbox = asyncio.create_task(run_outbox(bot, session_maker, settings.public_url))
+    stop_outbox = asyncio.Event()
+    outbox = asyncio.create_task(run_outbox(bot, session_maker, settings.public_url, stop_outbox))
     try:
-        await dp.start_polling(bot)
+        # Сессию бота закрываем сами: воркеру нужно доотправить текущую пачку
+        await dp.start_polling(bot, close_bot_session=False)
     finally:
-        outbox.cancel()
+        stop_outbox.set()
+        try:
+            await asyncio.wait_for(outbox, SHUTDOWN_TIMEOUT)
+        except TimeoutError:
+            logging.getLogger(__name__).error("Воркер уведомлений не успел завершиться")
+        await bot.session.close()
         scheduler.shutdown(wait=False)
         if health is not None:
             await health.cleanup()
