@@ -56,21 +56,6 @@ def report_text(view: mod.ReportView) -> str:
     )
 
 
-async def announce_ban(bot: Bot, result: mod.BanResult) -> None:
-    await ui.notify(bot, result.user.telegram_id, "Ваш доступ к боту ограничен администратором.")
-    for closed in result.closed:
-        for chat_id in closed.notify_ids:
-            await ui.notify(
-                bot, chat_id, f"Группа {closed.title} закрыта: организатор заблокирован."
-            )
-    for left in result.left:
-        await ui.notify(
-            bot,
-            left.owner_telegram_id,
-            f"Участник группы {left.title} заблокирован и удалён из неё. Место свободно.",
-        )
-
-
 @router.message(Command("reports"))
 async def cmd_reports(message: Message) -> None:
     views = await mod.list_open_reports(session_maker)
@@ -90,12 +75,10 @@ async def resolve(callback: CallbackQuery, bot: Bot) -> None:
     ban = data.startswith(BAN)
     report_id = int(data.removeprefix(BAN if ban else DISMISS))
     try:
-        outcome = await mod.resolve_report(session_maker, report_id, ban, admin_ids())
+        await mod.resolve_report(session_maker, report_id, ban, admin_ids())
     except groups_svc.GroupError as e:
         await callback.answer(str(e), show_alert=True)
         return
-    if outcome.ban is not None:
-        await announce_ban(bot, outcome.ban)
     verdict = "✅ Пользователь забанен" if ban else "Жалоба отклонена"
     original = callback.message.html_text if callback.message else ""  # type: ignore[union-attr]
     await ui.show(callback, f"{original}\n\n{verdict}", None, html=True)
@@ -110,7 +93,6 @@ async def cmd_ban(message: Message, command: CommandObject, bot: Bot) -> None:
         await message.answer(str(e))
         return
     await message.answer(f"@{user.username} забанен. Закрыто групп: {len(result.closed)}.")
-    await announce_ban(bot, result)
 
 
 @router.message(Command("unban"))
@@ -122,7 +104,6 @@ async def cmd_unban(message: Message, command: CommandObject, bot: Bot) -> None:
         await message.answer(str(e))
         return
     await message.answer(f"@{user.username} разбанен. Закрытые группы не восстанавливаются.")
-    await ui.notify(bot, user.telegram_id, "Ваш доступ к боту восстановлен.")
 
 
 async def services_screen() -> tuple[str, InlineKeyboardMarkup]:

@@ -5,6 +5,7 @@ from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from shared.db.models import Group, GroupStatus, Membership, MembershipStatus, Service, User
+from shared.notifications import NotificationType, enqueue, user_ref
 from shared.services.groups import GroupError, Role, SessionMaker, lock_group, role_in_session
 
 MAX_SHOWN_APPLICANTS = 10
@@ -25,7 +26,6 @@ class Departure:
 class Closure:
     group: Group
     service: Service
-    notify_ids: list[int]
 
 
 @dataclass
@@ -102,24 +102,41 @@ async def leave_group(session_maker: SessionMaker, group_id: int, user_id: int) 
         user = await session.get(User, user_id)
         owner = await session.get(User, group.owner_id)
         service = await session.get(Service, group.service_id)
+        await enqueue(
+            session,
+            group.owner_id,
+            NotificationType.MEMBER_LEFT,
+            {
+                "group_id": group.id,
+                "title": f"{service.name} {service.plan_name}",  # type: ignore[union-attr]
+                "was_approved": was_approved,
+                **user_ref(user, "member"),  # type: ignore[arg-type]
+            },
+        )
         return Departure(group, service, user, owner, was_approved)  # type: ignore[arg-type]
 
 
-async def close_in_session(session: AsyncSession, group: Group) -> list[int]:
-    """Закрывает группу, отклоняет ждущие заявки; возвращает telegram_id тех, кого уведомить."""
-    rows = await session.execute(
-        select(User.telegram_id)
-        .join(Membership, Membership.user_id == User.id)
-        .where(Membership.group_id == group.id, Membership.status.in_(ACTIVE))
+async def close_in_session(session: AsyncSession, group: Group, by_ban: bool = False) -> None:
+    """Закрывает группу, отклоняет ждущие заявки и ставит в очередь уведомления участникам."""
+    service = await session.get(Service, group.service_id)
+    user_ids = await session.scalars(
+        select(Membership.user_id).where(
+            Membership.group_id == group.id, Membership.status.in_(ACTIVE)
+        )
     )
-    notify_ids = [r[0] for r in rows]
+    payload = {
+        "group_id": group.id,
+        "title": f"{service.name} {service.plan_name}",  # type: ignore[union-attr]
+        "by_ban": by_ban,
+    }
+    for user_id in list(user_ids):
+        await enqueue(session, user_id, NotificationType.GROUP_CLOSED, payload)
     await session.execute(
         update(Membership)
         .where(Membership.group_id == group.id, Membership.status == MembershipStatus.PENDING)
         .values(status=MembershipStatus.REJECTED)
     )
     group.status = GroupStatus.CLOSED
-    return notify_ids
 
 
 async def close_group(session_maker: SessionMaker, group_id: int, owner_id: int) -> Closure:
@@ -129,9 +146,9 @@ async def close_group(session_maker: SessionMaker, group_id: int, owner_id: int)
             raise GroupError("Это не ваша группа.")
         if group.status == GroupStatus.CLOSED:
             raise GroupError("Группа уже закрыта.")
-        notify_ids = await close_in_session(session, group)
+        await close_in_session(session, group)
         service = await session.get(Service, group.service_id)
-        return Closure(group, service, notify_ids)  # type: ignore[arg-type]
+        return Closure(group, service)  # type: ignore[arg-type]
 
 
 async def list_user_groups(session_maker: SessionMaker, user_id: int) -> list[GroupEntry]:
@@ -281,7 +298,21 @@ async def remove_member(session_maker: SessionMaker, membership_id: int, owner_i
             removed_by=owner_id,
         )
         await session.refresh(membership)
-        return await _removal_context(session, membership, group)
+        removal = await _removal_context(session, membership, group)
+        await _announce_removal(session, removal)
+        return removal
+
+
+async def _announce_removal(
+    session: AsyncSession, removal: Removal, reason: str | None = None
+) -> None:
+    payload = {
+        "group_id": removal.group.id,
+        "title": f"{removal.service.name} {removal.service.plan_name}",
+        "owner_id": removal.owner.id,
+        "reason": reason,
+    }
+    await enqueue(session, removal.member.id, NotificationType.MEMBER_REMOVED, payload)
 
 
 async def set_removal_reason(
@@ -305,4 +336,6 @@ async def set_removal_reason(
             raise GroupError("Причина уже указана.")
         membership.removal_reason = reason
         group = await session.get(Group, membership.group_id)
-        return await _removal_context(session, membership, group)  # type: ignore[arg-type]
+        removal = await _removal_context(session, membership, group)  # type: ignore[arg-type]
+        await _announce_removal(session, removal, reason)
+        return removal

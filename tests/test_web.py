@@ -189,3 +189,29 @@ async def test_banned_user_session_is_dropped(app, session_maker) -> None:
         assert (await client.get("/cabinet")).headers["location"] == "/login"
         r = await client.get("/auth/telegram", params=login_params(42))
         assert r.status_code == 403
+
+
+async def test_dev_login_is_off_by_default_and_with_public_url(app, session_maker) -> None:
+    async with make_client(app) as client:
+        assert (await client.get("/dev-login")).status_code == 404
+        assert (await client.post("/dev-login", data={"telegram_id": 5})).status_code in (403, 404)
+    for extra in ({"dev_login": True, "public_url": "https://example.com"},):
+        settings = BackendSettings(bot_token=TOKEN, _env_file=None, **extra)
+        async with make_client(create_app(session_maker, settings)) as client:
+            assert (await client.get("/dev-login")).status_code == 404
+
+
+async def test_dev_login_works_when_enabled(session_maker) -> None:
+    settings = BackendSettings(bot_token=TOKEN, dev_login=True, _env_file=None)
+    async with make_client(create_app(session_maker, settings)) as client:
+        token = (
+            (await client.get("/dev-login"))
+            .text.split('name="csrf_token" value="')[1]
+            .split('"')[0]
+        )
+        r = await client.post(
+            "/dev-login", data={"telegram_id": 5, "username": "@dev", "csrf_token": token}
+        )
+        assert r.headers["location"] == "/cabinet"
+    async with session_maker() as s:
+        assert (await s.scalar(select(User))).username == "dev"

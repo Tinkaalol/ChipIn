@@ -2,7 +2,7 @@
 {% block title %}Личный кабинет{% endblock %}
 {% block content %}
 <h1>Личный кабинет</h1>
-<p>{% if user.username %}@{{ user.username }}{% else %}Telegram ID {{ user.telegram_id }}{% endif %}</p>
+<p>{% if user.username %}@{{ user.username }}{% elif user.telegram_id %}Telegram ID {{ user.telegram_id }}{% else %}Аккаунт без Telegram{% endif %}</p>
 <div class="row"><h2>Мои группы</h2><a class="btn" href="/groups/new">Создать группу</a></div>
 {% if not entries %}
   <p class="muted">Пока нет групп. Найдите подходящую в <a href="/groups">списке</a> или создайте свою (до {{ limit }} открытых).</p>

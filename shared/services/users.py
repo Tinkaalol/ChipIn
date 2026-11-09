@@ -1,4 +1,5 @@
 import logging
+from datetime import UTC, datetime
 
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
@@ -20,7 +21,12 @@ async def register_user(
     async with session_maker() as session:
         user = await _by_telegram_id(session, telegram_id)
         if user is None:
-            user = User(telegram_id=telegram_id, username=username)
+            user = User(
+                telegram_id=telegram_id,
+                username=username,
+                telegram_username=username,
+                telegram_linked_at=datetime.now(UTC),
+            )
             session.add(user)
             try:
                 await session.commit()
@@ -35,11 +41,17 @@ async def register_user(
                 return user
         if user.username != username:
             user.username = username
+            user.telegram_username = username
             await session.commit()
         return user
 
 
 LANGUAGES = ("ru", "kk", "en")
+
+
+def chat_id_for(user: User) -> int | None:
+    """Куда слать уведомление: только привязанному Telegram и если уведомления включены."""
+    return user.telegram_id if user.notify_enabled else None
 
 
 async def set_language(

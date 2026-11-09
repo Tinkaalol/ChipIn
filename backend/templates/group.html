@@ -21,7 +21,7 @@
   <p class="tag">Заявка отправлена, ждите ответа организатора.</p>
 {% elif card.role.value == "member" %}
   <h2>Контакт организатора</h2>
-  <p>{% if card.owner.username %}<a href="https://t.me/{{ card.owner.username }}">@{{ card.owner.username }}</a>{% else %}<a href="tg://user?id={{ card.owner.telegram_id }}">профиль в Telegram</a>{% endif %}</p>
+  <p>{% if card.owner.username %}<a href="https://t.me/{{ card.owner.username }}">@{{ card.owner.username }}</a>{% elif card.owner.telegram_id %}<a href="tg://user?id={{ card.owner.telegram_id }}">профиль в Telegram</a>{% else %}Организатор пока не указал контакт в Telegram{% endif %}</p>
   <p class="muted">Об оплате и доступе договаривайтесь напрямую. Не пересылайте пароли и данные карт через сайт.</p>
   {{ post("/groups/%d/leave" % g.id, "Выйти из группы", "btn danger") }}
 {% else %}
@@ -31,7 +31,7 @@
     <ul class="cards">
     {% for a in card.applicants %}
       <li class="card">
-        <span>{% if a.user.username %}@{{ a.user.username }}{% else %}Пользователь {{ a.user.telegram_id }}{% endif %}</span>
+        <span>{% if a.user.username %}@{{ a.user.username }}{% elif a.user.telegram_id %}Пользователь {{ a.user.telegram_id }}{% else %}Пользователь сайта{% endif %}</span>
         {{ post("/groups/%d/applications/%d" % (g.id, a.membership_id), "Принять", "btn", '<input type="hidden" name="decision" value="approve">') }}
         {{ post("/groups/%d/applications/%d" % (g.id, a.membership_id), "Отклонить", "btn alt", '<input type="hidden" name="decision" value="reject">') }}
       </li>

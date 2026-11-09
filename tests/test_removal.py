@@ -7,7 +7,7 @@ from shared.db.models import Group, GroupStatus, Membership, MembershipStatus, R
 from shared.services import groups as groups_svc
 from shared.services import memberships as ms
 from shared.services import moderation as mod
-from tests.fakes import callback_update, make_bot, message_update
+from tests.fakes import callback_update, flush_outbox, make_bot, message_update
 from tests.test_memberships import make_world, reload
 
 
@@ -196,12 +196,14 @@ async def test_removal_flow_through_bot(dp, session_maker) -> None:
     await dp.feed_update(bot, callback_update(o, f"g:rmok:{mid}", "owner"))
     async with session_maker() as s:
         assert (await s.get(Membership, mid)).status == MembershipStatus.REMOVED
+    assert "причину" in session.texts_to(o)[-1]
+    await flush_outbox(bot, session_maker)
     assert (
         session.texts_to(u1.telegram_id)[-1] == "Организатор удалил вас из группы Spotify Family."
     )
-    assert "причину" in session.texts_to(o)[-1]
 
     await dp.feed_update(bot, message_update(o, "Не платил два месяца", "owner"))
+    await flush_outbox(bot, session_maker)
     assert "Не платил два месяца" in session.texts_to(u1.telegram_id)[-1]
     async with session_maker() as s:
         assert (await s.get(Membership, mid)).removal_reason == "Не платил два месяца"
@@ -240,6 +242,7 @@ async def test_removed_member_can_file_complaint_through_bot(dp, session_maker) 
     bot, session = make_bot()
     await dp.feed_update(bot, callback_update(owner.telegram_id, f"g:rmok:{mid}", "owner"))
     complaint = f"r:new:{group.id}:{owner.id}"
+    await flush_outbox(bot, session_maker)
     sent = [c for c in session.calls if getattr(c, "chat_id", None) == u1.telegram_id][-1]
     assert complaint in str(sent.reply_markup)
     member = u1.telegram_id

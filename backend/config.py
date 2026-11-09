@@ -11,7 +11,8 @@ class BackendSettings(SharedSettings):
     bot_username: str = ""  # без @; домен сайта должен быть привязан к боту через /setdomain
     session_secret: str = ""
     cookie_secure: bool = True  # для локальной разработки по http: COOKIE_SECURE=false
-    public_url: str = ""  # https://example.com, нужен виджету входа за прокси
+    # Только для локальной разработки: вход без Telegram. В продакшене должен быть false
+    dev_login: bool = False
 
     @property
     def secret_key(self) -> str:

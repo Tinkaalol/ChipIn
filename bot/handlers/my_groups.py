@@ -14,7 +14,7 @@ from shared.db.session import session_maker
 from shared.services import groups as groups_svc
 from shared.services import memberships as svc
 from shared.services.groups import Role
-from shared.services.users import register_user
+from shared.services.users import chat_id_for, register_user
 
 router = Router(name="my_groups")
 
@@ -200,14 +200,6 @@ async def remove_confirmed(callback: CallbackQuery, bot: Bot, state: FSMContext)
     except groups_svc.GroupError as e:
         await callback.answer(str(e), show_alert=True)
         return
-    title = f"{removal.service.name} {removal.service.plan_name}"
-    complaint = [("Пожаловаться на организатора", f"{REPORT}{removal.group.id}:{removal.owner.id}")]
-    await ui.notify(
-        bot,
-        removal.member.telegram_id,
-        f"Организатор удалил вас из группы {title}.",
-        keyboards.build([complaint]),
-    )
     await state.set_state(RemoveFlow.reason)
     await state.update_data(membership_id=removal.membership.id, group_id=removal.group.id)
     text = (
@@ -238,12 +230,6 @@ async def removal_reason(message: Message, state: FSMContext, bot: Bot) -> None:
         await message.answer(str(e), reply_markup=keyboards.build([[("Без причины", REMOVE_SKIP)]]))
         return
     await state.clear()
-    title = f"{removal.service.name} {removal.service.plan_name}"
-    await ui.notify(
-        bot,
-        removal.member.telegram_id,
-        f"Причина удаления из группы {title}: {removal.membership.removal_reason}",
-    )
     await message.answer(
         "Причина передана.",
         reply_markup=keyboards.build([[("« К участникам", f"{MEMBERS}{removal.group.id}")]]),
@@ -279,8 +265,6 @@ async def close_confirmed(callback: CallbackQuery, bot: Bot) -> None:
         await callback.answer(str(e), show_alert=True)
         return
     title = f"{closure.service.name} {closure.service.plan_name}"
-    for chat_id in closure.notify_ids:
-        await ui.notify(bot, chat_id, f"Организатор закрыл группу {title}.")
     await ui.show(
         callback,
         f"Группа {title} закрыта.",
@@ -309,12 +293,6 @@ async def leave_confirmed(callback: CallbackQuery, bot: Bot) -> None:
         await callback.answer(str(e), show_alert=True)
         return
     title = f"{dep.service.name} {dep.service.plan_name}"
-    who = contact_html(dep.user.telegram_id, dep.user.username)
-    if dep.was_approved:
-        owner_text = f"Участник {who} вышел из группы {escape(title)}. Место снова свободно."
-    else:
-        owner_text = f"{who} отозвал заявку в группу {escape(title)}."
-    await ui.notify(bot, dep.owner.telegram_id, owner_text, html=True)
     await ui.show(
         callback,
         f"Вы вышли из группы {title}." if dep.was_approved else "Заявка отозвана.",
@@ -343,34 +321,13 @@ async def decide_application(callback: CallbackQuery, bot: Bot) -> None:
     except groups_svc.GroupError as e:
         await callback.answer(str(e), show_alert=True)
         return
-    title = f"{d.service.name} {d.service.plan_name}"
     if approve:
-        owner_contact = contact_html(d.owner.telegram_id, d.owner.username)
-        next_date = next_payment_date(d.group.billing_day, datetime.now(ALMATY).date())
-        delivered = await ui.notify(
-            bot,
-            d.member.telegram_id,
-            f"Ваша заявка в группу {escape(title)} принята.\n"
-            f"Организатор: {owner_contact}\n"
-            f"Ближайшая оплата: {next_date:%d.%m.%Y} "
-            f"({d.group.billing_day}-го числа каждого месяца), "
-            f"взнос {money(d.group.price_per_member, d.service.currency)}.\n"
-            "Деньги переводите организатору напрямую, бот их не принимает.",
-            html=True,
-        )
         verdict = "✅ Принята"
-        if not delivered:
+        if chat_id_for(d.member) is None:
             verdict += "\nНе удалось уведомить участника, свяжитесь с ним сами."
         if d.group.status == GroupStatus.FULL:
             verdict += "\nВсе места заняты, набор закрыт."
     else:
-        await ui.notify(
-            bot,
-            d.member.telegram_id,
-            f"К сожалению, организатор не смог принять вашу заявку в группу {title}. "
-            "Спасибо за интерес! Новую заявку в эту группу можно подать через 24 часа, "
-            "а пока загляните в другие группы.",
-        )
         verdict = "❌ Отклонена"
     original = callback.message.html_text if callback.message else ""  # type: ignore[union-attr]
     back = keyboards.build([[("« К моим группам", keyboards.MY_GROUPS)]])

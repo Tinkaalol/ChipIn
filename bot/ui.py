@@ -20,13 +20,18 @@ async def show(
 
 async def notify(
     bot: Bot,
-    chat_id: int,
+    chat_id: int | None,
     text: str,
     markup: InlineKeyboardMarkup | None = None,
     *,
     html: bool = False,
 ) -> bool:
-    """Пишет другому пользователю; если он заблокировал бота, не роняет обработчик."""
+    """Пишет другому пользователю; если он заблокировал бота, не роняет обработчик.
+
+    chat_id None: у пользователя нет привязанного Telegram или он выключил уведомления.
+    """
+    if chat_id is None:
+        return False
     try:
         await bot.send_message(
             chat_id, text, reply_markup=markup, parse_mode="HTML" if html else None

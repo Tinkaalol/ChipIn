@@ -6,11 +6,19 @@ import logging
 from sqlalchemy import select
 
 from bot.services.ratelimit import RateLimiter
-from shared.db.models import Group, GroupStatus, Membership, MembershipStatus
+from shared.db.models import (
+    Group,
+    GroupStatus,
+    Membership,
+    MembershipStatus,
+    NotificationOutbox,
+    NotificationStatus,
+    User,
+)
 from shared.services import groups as groups_svc
 from shared.services.catalog import seed_services
 from shared.services.users import register_user
-from tests.fakes import callback_update, make_bot, message_update
+from tests.fakes import callback_update, flush_outbox, make_bot, message_update
 
 OWNER, PATIENT = 100, 200
 SECRET = "owner_secret"
@@ -89,11 +97,13 @@ async def test_organizer_contact_hidden_until_approved(dp, session_maker) -> Non
     assert "Заявка отправлена, ждём ответа" in before
 
     # организатор получил заявку и принимает её
+    await flush_outbox(bot, session_maker)
     owner_msgs = session.texts_to(OWNER)
     assert any("@pat" in t for t in owner_msgs)
     async with session_maker() as s:
         membership = await s.scalar(select(Membership))
     await press(dp, bot, OWNER, f"m:ok:{membership.id}", SECRET)
+    await flush_outbox(bot, session_maker)
 
     after = "\n".join(session.texts_to(PATIENT))
     assert f"@{SECRET}" in after and "7-го числа" in after
@@ -123,6 +133,7 @@ async def test_full_lifecycle_apply_approve_leave_close(dp, session_maker) -> No
         status = (await s.get(Membership, memberships[0].id)).status
     assert (refreshed.status, refreshed.slots_free) == (GroupStatus.OPEN, 1)
     assert status == MembershipStatus.LEFT
+    await flush_outbox(bot, session_maker)
     assert any("вышел" in t for t in session.texts_to(OWNER))
 
     await press(dp, bot, OWNER, f"g:closeok:{group.id}", SECRET)
@@ -148,21 +159,43 @@ async def test_application_rate_limit(dp, session_maker, monkeypatch) -> None:
         assert await s.scalar(select(Membership)) is None
 
 
-async def test_unreachable_organizer_is_reported_to_applicant(dp, session_maker) -> None:
+async def test_unreachable_organizer_does_not_break_application(dp, session_maker) -> None:
     bot, session = make_bot(blocked_chats={OWNER})
     group = await create_group_via_bot(dp, bot, session_maker)
     await press(dp, bot, PATIENT, f"s:apply:{group.id}", "pat")
-    assert "не получил уведомление" in session.texts_to(PATIENT)[-1]
+    assert "Заявка отправлена" in session.texts_to(PATIENT)[-1]
+    stats = await flush_outbox(bot, session_maker)
+    assert stats["failed"] == 1  # бот заблокирован: повторять нет смысла
     async with session_maker() as s:
         assert await s.scalar(select(Membership)) is not None  # заявка сохранена
+        row = await s.scalar(select(NotificationOutbox))
+    assert row.status == NotificationStatus.FAILED and "blocked" in row.error
 
 
-async def test_unreachable_member_is_reported_to_organizer(dp, session_maker) -> None:
+async def test_unreachable_member_does_not_break_approval(dp, session_maker) -> None:
     bot, session = make_bot(blocked_chats={PATIENT})
     group = await create_group_via_bot(dp, bot, session_maker)
     await press(dp, bot, PATIENT, f"s:apply:{group.id}", "pat")
     async with session_maker() as s:
         membership = await s.scalar(select(Membership))
+    await press(dp, bot, OWNER, f"m:ok:{membership.id}", SECRET)
+    assert "✅ Принята" in session.texts_to(OWNER)[-1]
+    await flush_outbox(bot, session_maker)
+    async with session_maker() as s:
+        statuses = [r.status for r in await s.scalars(select(NotificationOutbox))]
+    assert NotificationStatus.FAILED in statuses
+
+
+async def test_applicant_without_telegram_notifications_is_told_to_contact(
+    dp, session_maker
+) -> None:
+    bot, session = make_bot()
+    group = await create_group_via_bot(dp, bot, session_maker)
+    await press(dp, bot, PATIENT, f"s:apply:{group.id}", "pat")
+    async with session_maker() as s:
+        membership = await s.scalar(select(Membership))
+        (await s.get(User, membership.user_id)).notify_enabled = False
+        await s.commit()
     await press(dp, bot, OWNER, f"m:ok:{membership.id}", SECRET)
     assert "Не удалось уведомить участника" in session.texts_to(OWNER)[-1]
 
@@ -247,17 +280,19 @@ async def test_owner_gets_request_message_and_member_gets_contact_and_date(
     bot, session = make_bot()
     group = await create_group_via_bot(dp, bot, session_maker)  # оплата 7-го числа
     await press(dp, bot, PATIENT, f"s:apply:{group.id}", "pat")
+    await flush_outbox(bot, session_maker)
     assert any(
         t.startswith("Новая заявка в группу Spotify Family: @pat") for t in session.texts_to(OWNER)
     )
     async with session_maker() as s:
         membership = await s.scalar(select(Membership))
     await press(dp, bot, OWNER, f"m:ok:{membership.id}", SECRET)
+    await flush_outbox(bot, session_maker)
     message = session.texts_to(PATIENT)[-1]
     assert f"@{SECRET}" in message and "Ближайшая оплата: " in message
     from datetime import datetime
 
-    from bot.services.reminders import ALMATY, next_payment_date
+    from shared.dates import ALMATY, next_payment_date
 
     expected = next_payment_date(7, datetime.now(ALMATY).date())
     assert f"{expected:%d.%m.%Y}" in message
@@ -273,6 +308,7 @@ async def test_rejection_is_polite_and_survives_blocked_member(dp, session_maker
     async with session_maker() as s:
         assert (await s.get(Membership, membership.id)).status == MembershipStatus.REJECTED
     assert "Отклонена" in session.texts_to(OWNER)[-1]
+    assert (await flush_outbox(bot, session_maker))["failed"] == 1  # заблокировал бота
 
     bot2, session2 = make_bot()
     group2 = await create_group_via_bot_second(dp, bot2, session_maker)
@@ -280,6 +316,7 @@ async def test_rejection_is_polite_and_survives_blocked_member(dp, session_maker
     async with session_maker() as s:
         m2 = (await s.scalars(select(Membership).where(Membership.group_id == group2.id))).one()
     await press(dp, bot2, OWNER, f"m:no:{m2.id}", SECRET)
+    await flush_outbox(bot2, session_maker)
     text = session2.texts_to(400)[-1]
     assert "К сожалению" in text and "через 24 часа" in text
 

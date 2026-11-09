@@ -12,6 +12,7 @@ from sqlalchemy.exc import IntegrityError, OperationalError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from shared.db.models import Group, GroupStatus, Membership, MembershipStatus, Service, User
+from shared.notifications import NotificationType, enqueue, user_ref
 
 MAX_OPEN_GROUPS = 3
 PAGE_SIZE = 5
@@ -305,6 +306,18 @@ async def request_join(
             raise GroupError("Вы уже подали заявку, ждите ответа организатора.") from None
         owner = await session.get(User, group.owner_id)
         service = await session.get(Service, group.service_id)
+        await enqueue(
+            session,
+            group.owner_id,
+            NotificationType.NEW_JOIN_REQUEST,
+            {
+                "group_id": group.id,
+                "membership_id": membership.id,
+                "title": f"{service.name} {service.plan_name}",  # type: ignore[union-attr]
+                "slots_free": group.slots_free,
+                **user_ref(applicant, "applicant"),
+            },
+        )
         return Application(membership, group, service, applicant, owner)  # type: ignore[arg-type]
 
 
@@ -390,7 +403,26 @@ async def _decide(
         member = await session.get(User, membership.user_id)
         owner = await session.get(User, group.owner_id)
         service = await session.get(Service, group.service_id)
+        await _announce_decision(session, group, service, member, owner, approve)  # type: ignore[arg-type]
         return Decision(membership, group, service, member, owner, approve)  # type: ignore[arg-type]
+
+
+async def _announce_decision(
+    session: AsyncSession, group: Group, service: Service, member: User, owner: User, approve: bool
+) -> None:
+    payload: dict[str, object] = {
+        "group_id": group.id,
+        "title": f"{service.name} {service.plan_name}",
+    }
+    if approve:
+        payload |= {
+            "billing_day": group.billing_day,
+            "price": str(group.price_per_member),
+            "currency": service.currency,
+            **user_ref(owner, "owner"),
+        }
+    kind = NotificationType.REQUEST_APPROVED if approve else NotificationType.REQUEST_REJECTED
+    await enqueue(session, member.id, kind, payload)
 
 
 async def _take_slot(session: AsyncSession, group_id: int) -> None:

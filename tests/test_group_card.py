@@ -7,7 +7,7 @@ from shared.db.models import Group, GroupStatus, Membership, MembershipStatus
 from shared.services import groups as groups_svc
 from shared.services import memberships as ms
 from shared.services.groups import Role
-from tests.fakes import callback_update, make_bot
+from tests.fakes import callback_update, flush_outbox, make_bot
 from tests.test_memberships import make_world
 
 TODAY = date(2026, 6, 3)  # день оплаты в make_world — 10-е
@@ -186,6 +186,7 @@ async def test_card_buttons_work_end_to_end(dp, session_maker) -> None:
     await dp.feed_update(bot, callback_update(owner.telegram_id, f"m:ok:{mid}", "owner"))
     async with session_maker() as s:
         assert (await s.get(Membership, mid)).status == MembershipStatus.APPROVED
+    await flush_outbox(bot, session_maker)
     assert any("принята" in t for t in session.texts_to(pending.telegram_id))
     await dp.feed_update(bot, callback_update(pending.telegram_id, f"g:view:{group.id}", "u1"))
     assert "Организатор: @owner" in session.texts_to(pending.telegram_id)[-1]

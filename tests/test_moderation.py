@@ -13,6 +13,7 @@ from shared.db.models import (
 )
 from shared.services import groups as groups_svc
 from shared.services import moderation as mod
+from tests.fakes import outbox
 from tests.test_memberships import make_world, reload
 
 
@@ -39,7 +40,11 @@ async def test_ban_closes_owned_groups_and_rejects_pending(session_maker) -> Non
         MembershipStatus.REJECTED
     )
     assert len(result.closed) == 1
-    assert sorted(result.closed[0].notify_ids) == [u1.telegram_id, u2.telegram_id]
+    closed = await outbox(session_maker, "group_closed")
+    assert sorted(e.user_id for e in closed) == sorted([u1.id, u2.id])
+    assert all(e.payload["by_ban"] for e in closed)
+    blocked = await outbox(session_maker, "account_blocked")
+    assert [e.user_id for e in blocked] == [owner.id]
 
 
 async def test_ban_removes_member_and_returns_slot(session_maker) -> None:
@@ -55,7 +60,9 @@ async def test_ban_removes_member_and_returns_slot(session_maker) -> None:
     assert (await reload(session_maker, Membership, app.membership.id)).status == (
         MembershipStatus.LEFT
     )
-    assert [left.owner_telegram_id for left in result.left] == [owner.telegram_id]
+    assert [left.owner_id for left in result.left] == [owner.id]
+    freed = await outbox(session_maker, "slot_freed")
+    assert [e.user_id for e in freed] == [owner.id]
 
 
 async def test_cannot_ban_admin_or_twice_or_missing(session_maker) -> None:

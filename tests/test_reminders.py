@@ -6,7 +6,9 @@ from aiogram.exceptions import TelegramForbiddenError
 from aiogram.methods import SendMessage
 from sqlalchemy import select
 
+from bot.outbox import process_outbox
 from bot.services import reminders as r
+from shared.dates import effective_billing_day
 from shared.db.models import Group, GroupStatus, Membership, MembershipStatus, Service, User
 
 
@@ -24,7 +26,7 @@ from shared.db.models import Group, GroupStatus, Membership, MembershipStatus, S
     ],
 )
 def test_effective_billing_day(billing_day: int, year: int, month: int, expected: int) -> None:
-    assert r.effective_billing_day(billing_day, year, month) == expected
+    assert effective_billing_day(billing_day, year, month) == expected
 
 
 @pytest.mark.parametrize(
@@ -78,6 +80,13 @@ class FakeBot:
         self.sent.append((chat_id, text))
 
 
+async def run(bot: FakeBot, sm, today: date) -> int:
+    """Ставит напоминания в очередь и сразу отправляет их; возвращает число событий."""
+    queued = await r.enqueue_daily_reminders(sm, today)
+    await process_outbox(bot, sm)  # type: ignore[arg-type]
+    return queued
+
+
 async def make_group(
     sm, billing_day: int = 10, status: GroupStatus = GroupStatus.OPEN, members: int = 2
 ):
@@ -109,7 +118,7 @@ async def make_group(
 async def test_reminds_owner_and_approved_members_with_amount(session_maker) -> None:
     await make_group(session_maker, billing_day=10)
     bot = FakeBot()
-    sent = await r.send_daily_reminders(bot, session_maker, today=date(2026, 6, 9))
+    sent = await run(bot, session_maker, date(2026, 6, 9))
     assert sent == 3
     assert {chat for chat, _ in bot.sent} == {1, 10, 11}
     assert all(text.startswith("Завтра") for _, text in bot.sent)
@@ -120,14 +129,14 @@ async def test_reminds_owner_and_approved_members_with_amount(session_maker) -> 
 async def test_today_reminder_text(session_maker) -> None:
     await make_group(session_maker, billing_day=10)
     bot = FakeBot()
-    await r.send_daily_reminders(bot, session_maker, today=date(2026, 6, 10))
+    await run(bot, session_maker, date(2026, 6, 10))
     assert all(text.startswith("Сегодня") for _, text in bot.sent)
 
 
 async def test_no_reminder_on_other_days(session_maker) -> None:
     await make_group(session_maker, billing_day=10)
     bot = FakeBot()
-    assert await r.send_daily_reminders(bot, session_maker, today=date(2026, 6, 5)) == 0
+    assert await run(bot, session_maker, date(2026, 6, 5)) == 0
     assert bot.sent == []
 
 
@@ -135,19 +144,18 @@ async def test_not_sent_twice_in_one_day(session_maker) -> None:
     await make_group(session_maker, billing_day=10)
     bot = FakeBot()
     today = date(2026, 6, 9)
-    assert await r.send_daily_reminders(bot, session_maker, today=today) == 3
-    assert await r.send_daily_reminders(bot, session_maker, today=today) == 0
+    assert await run(bot, session_maker, today) == 3
+    assert await run(bot, session_maker, today) == 0
     assert len(bot.sent) == 3
     # на следующий день приходит второе напоминание («сегодня»)
-    assert await r.send_daily_reminders(bot, session_maker, today=date(2026, 6, 10)) == 3
+    assert await run(bot, session_maker, date(2026, 6, 10)) == 3
 
 
 async def test_blocked_user_does_not_stop_the_rest(session_maker) -> None:
     await make_group(session_maker, billing_day=10)
     bot = FakeBot(blocked={10})
-    sent = await r.send_daily_reminders(bot, session_maker, today=date(2026, 6, 9))
-    assert sent == 2
-    assert {chat for chat, _ in bot.sent} == {1, 11}
+    assert await run(bot, session_maker, date(2026, 6, 9)) == 3
+    assert {chat for chat, _ in bot.sent} == {1, 11}  # заблокировавшему не доставлено
 
 
 async def test_skips_pending_left_closed_and_empty_groups(session_maker) -> None:
@@ -159,23 +167,23 @@ async def test_skips_pending_left_closed_and_empty_groups(session_maker) -> None
         await s.commit()
     bot = FakeBot()
     # одобренных участников нет — напоминать не о чем
-    assert await r.send_daily_reminders(bot, session_maker, today=date(2026, 6, 9)) == 0
+    assert await run(bot, session_maker, date(2026, 6, 9)) == 0
 
     async with session_maker() as s:
         (await s.get(Membership, memberships[0].id)).status = MembershipStatus.APPROVED
         (await s.get(Group, group.id)).status = GroupStatus.CLOSED
         await s.commit()
-    assert await r.send_daily_reminders(bot, session_maker, today=date(2026, 6, 9)) == 0
+    assert await run(bot, session_maker, date(2026, 6, 9)) == 0
 
 
 async def test_full_group_is_reminded(session_maker) -> None:
     await make_group(session_maker, billing_day=10, status=GroupStatus.FULL)
     bot = FakeBot()
-    assert await r.send_daily_reminders(bot, session_maker, today=date(2026, 6, 9)) == 3
+    assert await run(bot, session_maker, date(2026, 6, 9)) == 3
 
 
 async def test_scheduler_runs_daily_at_ten_almaty(session_maker) -> None:
-    scheduler = r.start_reminders(FakeBot(), session_maker)  # type: ignore[arg-type]
+    scheduler = r.start_reminders(session_maker)
     try:
         job = scheduler.get_job("daily_reminders")
         fields = {f.name: str(f) for f in job.trigger.fields}

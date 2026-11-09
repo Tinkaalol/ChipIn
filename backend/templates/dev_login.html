@@ -1,0 +1,12 @@
+{% extends "base.html" %}
+{% block title %}Вход для разработки{% endblock %}
+{% block content %}
+<h1>Вход для разработки</h1>
+<p class="flash error">Только для локальной проверки. Не включайте DEV_LOGIN на сервере.</p>
+<form method="post" action="/dev-login" class="form" hx-boost="false">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+  <label>Telegram ID<input type="number" name="telegram_id" min="1" value="1001" required></label>
+  <label>Username (необязательно)<input name="username" value="demo_user"></label>
+  <button class="btn">Войти</button>
+</form>
+{% endblock %}

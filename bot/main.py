@@ -10,6 +10,7 @@ from bot.config import get_settings
 from bot.handlers import admin, create_group, errors, my_groups, report, search, start
 from bot.health import start_health_server
 from bot.middlewares import BanMiddleware, TextStateGuard
+from bot.outbox import run_outbox
 from bot.services.reminders import start_reminders
 from shared.db.session import engine, session_maker
 from shared.services.catalog import seed_services
@@ -50,10 +51,12 @@ async def main() -> None:
     dp = build_dispatcher()
     logging.getLogger(__name__).info("Бот запущен (long polling)")
     health = await start_health_server()
-    scheduler = start_reminders(bot, session_maker)
+    scheduler = start_reminders(session_maker)
+    outbox = asyncio.create_task(run_outbox(bot, session_maker, settings.public_url))
     try:
         await dp.start_polling(bot)
     finally:
+        outbox.cancel()
         scheduler.shutdown(wait=False)
         if health is not None:
             await health.cleanup()

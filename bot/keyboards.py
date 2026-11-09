@@ -83,3 +83,7 @@ def build(rows: list[list[tuple[str, str]]]) -> InlineKeyboardMarkup:
             for row in rows
         ]
     )
+
+
+def url_button(text: str, url: str) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(inline_keyboard=[[InlineKeyboardButton(text=text, url=url)]])

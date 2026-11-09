@@ -9,6 +9,7 @@
           data-telegram-login="{{ bot_username }}" data-size="large"
           data-auth-url="{{ auth_url }}" data-request-access="write"></script>
 {% else %}
-  <p class="flash error">Вход не настроен: задайте BOT_USERNAME.</p>
+  <p class="flash error">Вход через Telegram не настроен: задайте BOT_USERNAME.</p>
 {% endif %}
+{% if dev_login %}<p><a class="btn alt" href="/dev-login">Вход для разработки (без Telegram)</a></p>{% endif %}
 {% endblock %}

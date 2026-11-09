@@ -1,7 +1,7 @@
 import secrets
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Form, Query, Request
+from fastapi import APIRouter, Depends, Form, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 
 from backend.auth import TelegramAuthError, verify_telegram_login
@@ -10,6 +10,13 @@ from shared.db.models import User
 from shared.services import groups as groups_svc
 from shared.services import memberships as ms
 from shared.services.groups import PAGE_SIZE, GroupError
+from shared.services.telegram_link import (
+    START_PREFIX,
+    TOKEN_TTL,
+    create_link_token,
+    set_notifications,
+    unlink_telegram,
+)
 from shared.services.users import LANGUAGES, register_user, set_language
 
 router = APIRouter()
@@ -44,6 +51,7 @@ async def login(request: Request, user: Annotated[User | None, Depends(optional_
         request,
         "login.html",
         None,
+        dev_login=_dev_login_enabled(request),
         bot_username=settings.bot_username,
         auth_url=f"{base}/auth/telegram",
     )
@@ -80,6 +88,34 @@ async def telegram_callback(request: Request):
             auth_url=str(request.url_for("telegram_callback")),
         )
     request.session.clear()  # новая сессия после входа: защита от фиксации сессии
+    request.session["uid"] = user.id
+    request.session["csrf"] = secrets.token_urlsafe(32)
+    return back("/cabinet", request)
+
+
+def _dev_login_enabled(request: Request) -> bool:
+    settings = request.app.state.settings
+    return settings.dev_login and not settings.public_url  # с публичным адресом не включается
+
+
+@router.get("/dev-login", response_class=HTMLResponse)
+async def dev_login_page(request: Request):
+    if not _dev_login_enabled(request):
+        raise HTTPException(status_code=404)
+    return render(request, "dev_login.html", None)
+
+
+@router.post("/dev-login", dependencies=[Csrf])
+async def dev_login(
+    request: Request,
+    telegram_id: Annotated[int, Form(ge=1)],
+    username: Annotated[str, Form()] = "",
+):
+    if not _dev_login_enabled(request):
+        raise HTTPException(status_code=404)
+    sm = request.app.state.session_maker
+    user = await register_user(sm, telegram_id, username.strip().lstrip("@") or None)
+    request.session.clear()
     request.session["uid"] = user.id
     request.session["csrf"] = secrets.token_urlsafe(32)
     return back("/cabinet", request)
@@ -224,7 +260,37 @@ async def group_decide(
 
 @router.get("/settings", response_class=HTMLResponse)
 async def settings_page(request: Request, user: CurrentUser):
-    return render(request, "settings.html", user, languages=LANGUAGES)
+    return render(request, "settings.html", user, languages=LANGUAGES, link_url=None)
+
+
+@router.post("/settings/telegram/link", dependencies=[Csrf])
+async def telegram_link(request: Request, user: CurrentUser):
+    """Показывает одноразовую ссылку на бота. Она действует 10 минут."""
+    bot_username = request.app.state.settings.bot_username
+    if not bot_username:
+        return back("/settings", request, "Привязка не настроена: не задан BOT_USERNAME.")
+    token = await create_link_token(request.app.state.session_maker, user.id)
+    link_url = f"https://t.me/{bot_username}?start={START_PREFIX}{token}"
+    return render(
+        request,
+        "settings.html",
+        user,
+        languages=LANGUAGES,
+        link_url=link_url,
+        link_minutes=int(TOKEN_TTL.total_seconds() // 60),
+    )
+
+
+@router.post("/settings/telegram/unlink", dependencies=[Csrf])
+async def telegram_unlink(request: Request, user: CurrentUser):
+    await unlink_telegram(request.app.state.session_maker, user.id)
+    return back("/settings", request, "Telegram отвязан.")
+
+
+@router.post("/settings/notifications", dependencies=[Csrf])
+async def notifications(request: Request, user: CurrentUser, enabled: Annotated[str, Form()]):
+    await set_notifications(request.app.state.session_maker, user.id, enabled == "1")
+    return back("/settings", request, "Настройки сохранены.")
 
 
 @router.post("/settings", dependencies=[Csrf])

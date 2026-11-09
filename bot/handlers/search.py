@@ -1,15 +1,13 @@
-from html import escape
-
 from aiogram import Bot, F, Router
 from aiogram.types import CallbackQuery
 
 from bot import keyboards, ui
-from bot.handlers.my_groups import APPLICATION_DECIDE_PREFIX, render_card
+from bot.handlers.my_groups import render_card
 from bot.services.ratelimit import RATE_LIMIT_MESSAGE, application_limiter
-from bot.texts import contact_html, money
+from bot.texts import money
 from shared.db.session import session_maker
 from shared.services import groups as groups_svc
-from shared.services.users import register_user
+from shared.services.users import chat_id_for, register_user
 
 router = Router(name="search")
 
@@ -95,25 +93,9 @@ async def apply(callback: CallbackQuery, bot: Bot) -> None:
     except groups_svc.GroupError as e:
         await callback.answer(str(e), show_alert=True)
         return
-    decide = APPLICATION_DECIDE_PREFIX
-    applicant = contact_html(app.applicant.telegram_id, app.applicant.username)
-    delivered = await ui.notify(
-        bot,
-        app.owner.telegram_id,
-        f"Новая заявка в группу {escape(app.service.name)} {escape(app.service.plan_name)}: "
-        f"{applicant}\nСвободных мест: {app.group.slots_free}",
-        keyboards.build(
-            [
-                [
-                    ("Принять", f"{decide}ok:{app.membership.id}"),
-                    ("Отклонить", f"{decide}no:{app.membership.id}"),
-                ]
-            ]
-        ),
-        html=True,
-    )
+    # Уведомление организатору уже в очереди: его поставил сервис в той же транзакции
     text = "Заявка отправлена организатору. Я напишу, когда он ответит."
-    if not delivered:
+    if chat_id_for(app.owner) is None:
         text = (
             "Заявка сохранена, но организатор пока не получил уведомление "
             "(возможно, он остановил бота). Она появится у него, когда он вернётся."

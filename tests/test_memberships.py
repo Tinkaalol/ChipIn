@@ -8,6 +8,7 @@ from shared.db.models import Base, Group, GroupStatus, Membership, MembershipSta
 from shared.db.session import make_engine, make_session_maker
 from shared.services import groups as groups_svc
 from shared.services import memberships as svc
+from tests.fakes import outbox
 
 
 async def make_world(sm, free: int = 1, total: int = 3, applicants: int = 2):
@@ -174,7 +175,10 @@ async def test_close_group(session_maker) -> None:
     with pytest.raises(groups_svc.GroupError, match="не ваша"):
         await svc.close_group(session_maker, group.id, u1.id)
     closure = await svc.close_group(session_maker, group.id, owner.id)
-    assert sorted(closure.notify_ids) == [u1.telegram_id, u2.telegram_id]
+    assert closure.group.id == group.id
+    closed = await outbox(session_maker, "group_closed")
+    assert sorted(e.user_id for e in closed) == sorted([u1.id, u2.id])
+    assert not any(e.payload["by_ban"] for e in closed)
     assert (await reload(session_maker, Group, group.id)).status == GroupStatus.CLOSED
     m2 = await reload(session_maker, Membership, a2.membership.id)
     assert m2.status == MembershipStatus.REJECTED

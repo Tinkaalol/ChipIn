@@ -13,6 +13,7 @@ from shared.db.models import (
     Service,
     User,
 )
+from shared.notifications import NotificationType, enqueue, user_ref
 from shared.services.groups import GroupError, SessionMaker, lock_group
 from shared.services.memberships import ACTIVE, close_in_session, release_membership
 
@@ -33,12 +34,11 @@ class AlreadyBannedError(GroupError):
 @dataclass
 class ClosedGroup:
     title: str
-    notify_ids: list[int]
 
 
 @dataclass
 class LeftGroup:
-    owner_telegram_id: int
+    owner_id: int
     title: str
 
 
@@ -101,6 +101,7 @@ async def ban_user(session_maker: SessionMaker, user_id: int, protected_ids: set
         for group_id in await _affected_group_ids(session, user.id):
             await lock_group(session, group_id)
         user.is_banned = True
+        await enqueue(session, user.id, NotificationType.ACCOUNT_BLOCKED, {})
         closed = await _close_owned_groups(session, user.id)
         left = await _leave_joined_groups(session, user.id)
         return BanResult(user, closed, left)
@@ -126,8 +127,8 @@ async def _close_owned_groups(session: AsyncSession, user_id: int) -> list[Close
     )
     closed = []
     for group, service in rows.all():
-        notify_ids = await close_in_session(session, group)
-        closed.append(ClosedGroup(f"{service.name} {service.plan_name}", notify_ids))
+        await close_in_session(session, group, by_ban=True)
+        closed.append(ClosedGroup(f"{service.name} {service.plan_name}"))
     return closed
 
 
@@ -136,11 +137,16 @@ async def _leave_joined_groups(session: AsyncSession, user_id: int) -> list[Left
         select(Membership).where(Membership.user_id == user_id, Membership.status.in_(ACTIVE))
     )
     left = []
+    banned = await session.get(User, user_id)
     for membership in list(memberships):
+        was_approved = membership.status == MembershipStatus.APPROVED
         group = await release_membership(session, membership)
         service = await session.get(Service, group.service_id)
-        owner = await session.get(User, group.owner_id)
-        left.append(LeftGroup(owner.telegram_id, f"{service.name} {service.plan_name}"))  # type: ignore[union-attr]
+        title = f"{service.name} {service.plan_name}"  # type: ignore[union-attr]
+        left.append(LeftGroup(group.owner_id, title))
+        if was_approved:  # о ждущей заявке организатору знать нечего: места она не занимала
+            payload = {"group_id": group.id, "title": title, **user_ref(banned, "member")}  # type: ignore[arg-type]
+            await enqueue(session, group.owner_id, NotificationType.SLOT_FREED, payload)
     return left
 
 
@@ -152,6 +158,7 @@ async def unban_user(session_maker: SessionMaker, user_id: int) -> User:
         if not user.is_banned:
             raise GroupError("Пользователь не забанен.")
         user.is_banned = False
+        await enqueue(session, user.id, NotificationType.ACCOUNT_UNBLOCKED, {})
         return user
 
 

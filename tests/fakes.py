@@ -92,3 +92,23 @@ def callback_update(user_id: int, data: str, username: str = "u") -> Update:
         data=data,
     )
     return Update(update_id=_counter[0], callback_query=callback)
+
+
+async def flush_outbox(bot: Bot, session_maker, site_url: str = "") -> dict[str, int]:
+    """Прогоняет очередь уведомлений: в тестах воркер вручную, а не по таймеру."""
+    from bot.outbox import process_outbox
+
+    return await process_outbox(bot, session_maker, site_url)
+
+
+async def outbox(session_maker, *types: str) -> list:
+    """События очереди (при необходимости только указанных типов) в порядке создания."""
+    from sqlalchemy import select
+
+    from shared.db.models import NotificationOutbox
+
+    stmt = select(NotificationOutbox).order_by(NotificationOutbox.id)
+    if types:
+        stmt = stmt.where(NotificationOutbox.type.in_(types))
+    async with session_maker() as session:
+        return list(await session.scalars(stmt))

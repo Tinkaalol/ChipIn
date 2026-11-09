@@ -21,7 +21,7 @@ from shared.services import groups as groups_svc
 from shared.services import memberships as ms
 from shared.services import moderation as mod
 from shared.services.catalog import seed_services
-from tests.fakes import FakeSession, callback_update, make_bot, message_update
+from tests.fakes import FakeSession, callback_update, flush_outbox, make_bot, message_update
 
 ALICE, BOB, CAROL = 1001, 1002, 1003  # организатор и двое участников (telegram_id)
 
@@ -99,6 +99,7 @@ async def test_end_to_end_scenario(dp, session_maker) -> None:
     # 3. Боб подаёт заявку, у Алисы приходит сообщение с кнопками
     await d.press(BOB, f"s:apply:{group.id}", "bob")
     assert "Заявка отправлена" in d.last(BOB)
+    await flush_outbox(bot, session_maker)
     assert d.last(ALICE).startswith("Новая заявка в группу Spotify Family: @bob")
     accept = d.find_button(ALICE, "m:ok:")
     assert d.find_button(ALICE, "m:no:").startswith("m:no:")
@@ -109,6 +110,7 @@ async def test_end_to_end_scenario(dp, session_maker) -> None:
     # 4. Алиса принимает: группа заполнена, Бобу приходит контакт и дата оплаты
     await d.press(ALICE, accept, "alice")
     assert await group_state(session_maker, group.id) == (0, GroupStatus.FULL)
+    await flush_outbox(bot, session_maker)
     welcome = d.last(BOB)
     expected_date = next_payment_date(7, datetime.now(ALMATY).date())
     assert "@alice" in welcome and f"{expected_date:%d.%m.%Y}" in welcome
@@ -127,6 +129,7 @@ async def test_end_to_end_scenario(dp, session_maker) -> None:
     assert "Точно выйти" in d.last(BOB)
     await d.press(BOB, f"g:leaveok:{group.id}", "bob")
     assert "Вы вышли" in d.last(BOB)
+    await flush_outbox(bot, session_maker)
     assert "вышел из группы" in d.last(ALICE)
     assert await group_state(session_maker, group.id) == (1, GroupStatus.OPEN)
     await d.press(ALICE, f"g:view:{group.id}", "alice")
@@ -138,6 +141,7 @@ async def test_end_to_end_scenario(dp, session_maker) -> None:
 
     # 7. Кэрол подаёт заявку, Алиса принимает, затем удаляет её
     await d.press(CAROL, f"s:apply:{group.id}", "carol")
+    await flush_outbox(bot, session_maker)
     await d.press(ALICE, d.find_button(ALICE, "m:ok:"), "alice")
     assert await group_state(session_maker, group.id) == (0, GroupStatus.FULL)
     await d.press(ALICE, f"g:members:{group.id}", "alice")
@@ -146,8 +150,10 @@ async def test_end_to_end_scenario(dp, session_maker) -> None:
     await d.press(ALICE, remove, "alice")
     assert d.last(ALICE) == "Удалить @carol из группы? Он получит уведомление."
     await d.press(ALICE, remove.replace("g:rm:", "g:rmok:"), "alice")
+    await flush_outbox(bot, session_maker)
     assert d.session.texts_to(CAROL)[-1] == "Организатор удалил вас из группы Spotify Family."
     await d.say(ALICE, "Не платит", "alice")
+    await flush_outbox(bot, session_maker)
     assert "Не платит" in d.last(CAROL)
     assert await group_state(session_maker, group.id) == (1, GroupStatus.OPEN)
 
@@ -160,6 +166,7 @@ async def test_end_to_end_scenario(dp, session_maker) -> None:
 
     # 9. Приватность за весь сценарий: Боб и Кэрол не видели контакт Алисы,
     #    пока не были приняты (проверяем всё, что получала Кэрол до одобрения)
+    await flush_outbox(bot, session_maker)
     carol_texts = session.texts_to(CAROL)
     first_welcome = next(i for i, t in enumerate(carol_texts) if "принята" in t)
     before_approval = "\n".join(carol_texts[:first_welcome])

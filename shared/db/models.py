@@ -3,6 +3,7 @@ from datetime import UTC, date, datetime
 from decimal import Decimal
 
 from sqlalchemy import (
+    JSON,
     BigInteger,
     Date,
     DateTime,
@@ -13,6 +14,7 @@ from sqlalchemy import (
     String,
     Text,
     text,
+    true,
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
@@ -41,6 +43,13 @@ class MembershipStatus(enum.StrEnum):
     REMOVED = "removed"  # удалён организатором
 
 
+class NotificationStatus(enum.StrEnum):
+    PENDING = "pending"
+    SENT = "sent"
+    FAILED = "failed"
+    SKIPPED = "skipped"  # у получателя нет Telegram или уведомления выключены
+
+
 class ReportStatus(enum.StrEnum):
     NEW = "new"
     RESOLVED = "resolved"
@@ -62,8 +71,12 @@ class User(Base):
     __tablename__ = "users"
 
     id: Mapped[int] = mapped_column(primary_key=True)
-    telegram_id: Mapped[int] = mapped_column(BigInteger, unique=True, index=True)
+    # None у тех, кто пришёл на сайт без Telegram или отвязал его; уникален среди привязанных
+    telegram_id: Mapped[int | None] = mapped_column(BigInteger, unique=True, index=True)
     username: Mapped[str | None] = mapped_column(String(64))
+    telegram_username: Mapped[str | None] = mapped_column(String(64))
+    telegram_linked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    notify_enabled: Mapped[bool] = mapped_column(default=True, server_default=true())
     language: Mapped[str] = mapped_column(String(8), default="ru")
     is_banned: Mapped[bool] = mapped_column(default=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
@@ -136,3 +149,35 @@ class Report(Base):
     group_id: Mapped[int | None] = mapped_column(ForeignKey("groups.id"), index=True)
     reason: Mapped[str] = mapped_column(Text)
     status: Mapped[ReportStatus] = mapped_column(_enum(ReportStatus), default=ReportStatus.NEW)
+
+
+class TelegramLinkToken(Base):
+    """Одноразовая ссылка привязки Telegram. Сам токен не хранится, только его SHA-256."""
+
+    __tablename__ = "telegram_link_tokens"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    token_hash: Mapped[str] = mapped_column(String(64), unique=True)
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+
+
+class NotificationOutbox(Base):
+    """Очередь уведомлений: пишется в той же транзакции, что и бизнес-операция."""
+
+    __tablename__ = "notification_outbox"
+    __table_args__ = (Index("ix_notification_outbox_due", "status", "next_attempt_at"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[int] = mapped_column(ForeignKey("users.id"), index=True)
+    type: Mapped[str] = mapped_column(String(32))
+    payload: Mapped[dict] = mapped_column(JSON, default=dict)
+    status: Mapped[NotificationStatus] = mapped_column(
+        _enum(NotificationStatus), default=NotificationStatus.PENDING
+    )
+    attempts: Mapped[int] = mapped_column(default=0)
+    next_attempt_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now)
+    sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    error: Mapped[str | None] = mapped_column(Text)

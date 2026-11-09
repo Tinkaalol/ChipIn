@@ -15,6 +15,7 @@ class SharedSettings(BaseSettings):
 
     database_url: str = DEFAULT_DATABASE_URL
     admin_ids: Annotated[list[int], NoDecode] = []
+    public_url: str = ""  # адрес сайта, например https://example.com (кнопка в боте, виджет входа)
 
     @field_validator("database_url")
     @classmethod
