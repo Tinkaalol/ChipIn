@@ -1,13 +1,23 @@
+import logging
 from html import escape
 
 from aiogram import F, Router
+from aiogram.exceptions import TelegramAPIError
 from aiogram.filters import CommandStart
 from aiogram.fsm.context import FSMContext
-from aiogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, Message
+from aiogram.types import (
+    CallbackQuery,
+    ErrorEvent,
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
+    Message,
+)
 
 from db import Database, Row, free_slots
 
+logger = logging.getLogger(__name__)
 router = Router(name="main")
+ERROR_TEXT = "Что-то пошло не так. Попробуйте ещё раз через минуту."
 
 MAX_GROUP_BUTTONS = 20  # у Telegram есть предел на размер клавиатуры
 
@@ -73,6 +83,21 @@ def open_groups_screen(
     rows.append(button("‹ К сервисам", SERVICES_CB))
     text = "Открытые группы:" if groups else "Сейчас нет групп с набором. Создайте свою!"
     return text, InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+@router.errors()
+async def on_error(event: ErrorEvent) -> bool:
+    """Любая ошибка (например, Supabase недоступен) не оставляет пользователя без ответа."""
+    logger.error("Ошибка в обработчике", exc_info=event.exception)
+    update = event.update
+    try:
+        if update.callback_query is not None:
+            await update.callback_query.answer(ERROR_TEXT, show_alert=True)
+        elif update.message is not None:
+            await update.message.answer(ERROR_TEXT)
+    except TelegramAPIError:
+        logger.warning("Не удалось сообщить об ошибке пользователю", exc_info=True)
+    return True
 
 
 async def show_start(message: Message, db: Database) -> None:

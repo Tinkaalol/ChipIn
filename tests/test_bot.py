@@ -249,3 +249,31 @@ def test_open_groups_across_services() -> None:
 
 def test_free_slots() -> None:
     assert free_slots({"max_slots": 4, "current_slots": 1}) == 3
+
+
+def test_supabase_failure_still_answers_the_user() -> None:
+    dp, bot, session, db = make_env()
+
+    async def broken():
+        raise RuntimeError("Supabase недоступен")
+
+    db.list_services = broken  # type: ignore[method-assign]
+    run(dp.feed_update(bot, message_update("/start"), db=db))
+    (call,) = [c for c in session.calls if isinstance(c, SendMessage)]
+    assert "Что-то пошло не так" in call.text
+
+
+def test_supabase_url_keeps_only_the_base_address() -> None:
+    from config import Settings
+
+    for raw in (
+        "https://abc.supabase.co/rest/v1/",
+        "https://abc.supabase.co/",
+        " https://abc.supabase.co",
+    ):
+        assert (
+            Settings(
+                bot_token="1:T", supabase_url=raw, supabase_key="k", _env_file=None
+            ).supabase_url
+            == "https://abc.supabase.co"
+        )
