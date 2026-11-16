@@ -1,9 +1,12 @@
 """Заявка на создание группы или вступление: deep-links с сайта, ввод email, итоговая карточка."""
 
+import asyncio
+import logging
 import re
+from collections import defaultdict
 from html import escape
 
-from aiogram import F, Router
+from aiogram import Bot, F, Router
 from aiogram.filters import CommandObject, CommandStart, StateFilter
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import State, StatesGroup
@@ -12,7 +15,9 @@ from aiogram.types import User as TgUser
 
 from db import Database, Row, is_joinable
 from handlers import CREATE_PREFIX, JOIN_PREFIX, SERVICES_CB, button, money
+from payments import USER_ACCEPTED, SubmitError, submit_application
 
+logger = logging.getLogger(__name__)
 router = Router(name="flow")
 
 PAID_CB = "paid"
@@ -207,7 +212,42 @@ async def email_not_text(message: Message) -> None:
     await message.answer("Отправьте email обычным текстом.", reply_markup=cancel_keyboard())
 
 
+_locks: defaultdict[int, asyncio.Lock] = defaultdict(asyncio.Lock)
+
+
 @router.callback_query(Application.confirm, F.data == PAID_CB)
-async def paid(callback: CallbackQuery) -> None:
-    # Проверка оплаты и запись заявки в Supabase пока не реализованы
-    await callback.answer("Следующий шаг (подтверждение оплаты) ещё в разработке.", show_alert=True)
+async def paid(
+    callback: CallbackQuery, state: FSMContext, bot: Bot, db: Database, admin_id: int
+) -> None:
+    if not admin_id:
+        await callback.answer(
+            "Приём заявок временно недоступен, попробуйте позже.", show_alert=True
+        )
+        return
+    # Блокировка на пользователя: двойной клик не создаст две заявки
+    async with _locks[callback.from_user.id]:
+        if await state.get_state() != Application.confirm.state:
+            await callback.answer("Заявка уже отправлена.", show_alert=True)
+            return
+        data = await state.get_data()
+        service = await db.get_service(data["service_slug"])
+        if service is None:
+            await callback.answer("Этот сервис больше недоступен.", show_alert=True)
+            return
+        try:
+            await submit_application(bot, db, admin_id, data, service)
+        except SubmitError:
+            logger.exception("Заявка не дошла до администратора")
+            await callback.answer(
+                "Не получилось отправить заявку, попробуйте ещё раз.", show_alert=True
+            )
+            return
+        await state.clear()
+    if isinstance(callback.message, Message):
+        await callback.message.edit_reply_markup(reply_markup=None)  # кнопку «Я оплатил» убираем
+    await _reply(callback, USER_ACCEPTED)
+
+
+@router.callback_query(F.data == PAID_CB)
+async def paid_without_application(callback: CallbackQuery) -> None:
+    await callback.answer("Заявка уже отправлена или отменена.", show_alert=True)

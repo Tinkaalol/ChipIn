@@ -1,13 +1,17 @@
 import asyncio
+import copy
 import datetime
+import uuid
 from types import SimpleNamespace
 
 from aiogram import Bot, Dispatcher
 from aiogram.client.session.base import BaseSession
+from aiogram.exceptions import TelegramForbiddenError
 from aiogram.methods import EditMessageText, SendMessage
 from aiogram.types import Chat, Message, Update
 from aiogram.types import User as TgUser
 
+import admin
 import flow
 import handlers
 from db import Database, free_slots
@@ -62,37 +66,62 @@ GROUPS = [
 
 
 class FakeTable:
+    """Минимальная имитация таблицы Supabase: select/insert/update с фильтрами eq."""
+
     def __init__(self, rows: list[dict]) -> None:
-        self.rows, self.filters = rows, []
+        self.rows = rows  # тот же список, что в клиенте: изменения сохраняются
+        self.filters: list[tuple[str, object]] = []
+        self.mode, self.values = "select", {}
+        self.sort: str | None = None
 
     def select(self, _: str):
         return self
 
-    def eq(self, column: str, value: str):
+    def insert(self, values: dict):
+        self.mode, self.values = "insert", values
+        return self
+
+    def update(self, values: dict):
+        self.mode, self.values = "update", values
+        return self
+
+    def eq(self, column: str, value: object):
         self.filters.append((column, value))
         return self
 
     def order(self, column: str):
-        self.rows = sorted(self.rows, key=lambda r: r[column])
+        self.sort = column
         return self
 
     async def execute(self):
-        rows = [r for r in self.rows if all(r.get(c) == v for c, v in self.filters)]
-        return SimpleNamespace(data=rows)
+        if self.mode == "insert":
+            row = {"id": str(uuid.uuid4()), **self.values}
+            self.rows.append(row)
+            return SimpleNamespace(data=[dict(row)])
+        found = [r for r in self.rows if all(r.get(c) == v for c, v in self.filters)]
+        if self.mode == "update":
+            for row in found:
+                row.update(self.values)
+        if self.sort:
+            found = sorted(found, key=lambda r: r[self.sort])
+        return SimpleNamespace(data=[dict(r) for r in found])
 
 
 class FakeClient:
     def __init__(self) -> None:
-        self.tables = {"available_services": SERVICES, "groups": GROUPS}
+        self.tables = copy.deepcopy(
+            {"available_services": SERVICES, "groups": GROUPS, "applications": []}
+        )
 
     def table(self, name: str) -> FakeTable:
-        return FakeTable(list(self.tables[name]))
+        return FakeTable(self.tables[name])
 
 
 class FakeSession(BaseSession):
     def __init__(self) -> None:
         super().__init__()
         self.calls: list = []
+        self.fail_chats: set[int] = set()  # куда бот «не может» писать (заблокирован)
 
     async def close(self) -> None:
         pass
@@ -102,6 +131,8 @@ class FakeSession(BaseSession):
 
     async def make_request(self, bot, method, timeout=None):
         self.calls.append(method)
+        if isinstance(method, SendMessage) and method.chat_id in self.fail_chats:
+            raise TelegramForbiddenError(method=method, message="Forbidden: bot was blocked")
         return Message(
             message_id=1, date=datetime.datetime.now(), chat=Chat(id=5, type="private"), text="x"
         ).as_(bot)
@@ -112,8 +143,10 @@ def make_env() -> tuple[Dispatcher, Bot, FakeSession, Database]:
     handlers.router._parent_router = None  # роутер модульный: отцепляем от прошлого теста
     dp = Dispatcher()
     flow.router._parent_router = None
+    admin.router._parent_router = None
     dp.include_router(handlers.router)
     dp.include_router(flow.router)
+    dp.include_router(admin.router)
     return dp, Bot("1:TEST", session=session), session, Database(FakeClient())  # type: ignore[arg-type]
 
 
@@ -121,17 +154,17 @@ def buttons(call) -> list[tuple[str, str]]:
     return [(b.text, b.callback_data) for row in call.reply_markup.inline_keyboard for b in row]
 
 
-def message_update(text: str, username: str | None = None) -> Update:
+def message_update(text: str, username: str | None = None, user_id: int = 7) -> Update:
     from aiogram.types import MessageEntity
 
-    user = TgUser(id=7, is_bot=False, first_name="Али", username=username)
+    user = TgUser(id=user_id, is_bot=False, first_name="Али", username=username)
     entities = None
     if text.startswith("/"):
         entities = [MessageEntity(type="bot_command", offset=0, length=len(text.split()[0]))]
     msg = Message(
         message_id=1,
         date=datetime.datetime.now(),
-        chat=Chat(id=7, type="private"),
+        chat=Chat(id=user_id, type="private"),
         from_user=user,
         text=text,
         entities=entities,
@@ -139,12 +172,17 @@ def message_update(text: str, username: str | None = None) -> Update:
     return Update(update_id=1, message=msg)
 
 
-def callback_update(data: str, username: str | None = None) -> Update:
+def callback_update(
+    data: str, username: str | None = None, user_id: int = 7, message_text: str = "old"
+) -> Update:
     from aiogram.types import CallbackQuery
 
-    user = TgUser(id=7, is_bot=False, first_name="Али", username=username)
+    user = TgUser(id=user_id, is_bot=False, first_name="Али", username=username)
     msg = Message(
-        message_id=1, date=datetime.datetime.now(), chat=Chat(id=7, type="private"), text="old"
+        message_id=1,
+        date=datetime.datetime.now(),
+        chat=Chat(id=user_id, type="private"),
+        text=message_text,
     )
     cb = CallbackQuery(id="1", from_user=user, chat_instance="c", message=msg, data=data)
     return Update(update_id=2, callback_query=cb)

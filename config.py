@@ -11,6 +11,7 @@ class Settings(BaseSettings):
     supabase_key: str
     admin_id: int = 0  # Telegram ID администратора; 0 — не задан
     kaspi_payment_info: str = ""
+    support_contact: str = ""  # например @chipin_support; иначе ссылка на профиль админа
 
 
 @lru_cache

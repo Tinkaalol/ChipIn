@@ -19,26 +19,35 @@ from tests.test_bot import (
 KASPI = "Kaspi Gold +7 700 000 00 00 (Иван И.)"
 
 
+ADMIN = 999
+
+
 class Chat:
     """Один пользователь в одном диалоге: шлёт сообщения и нажимает кнопки."""
 
-    def __init__(self, username: str | None = "bob") -> None:
+    def __init__(
+        self, username: str | None = "bob", admin_id: int = ADMIN, support: str = "@chipin_help"
+    ) -> None:
         self.dp, self.bot, self.session, self.db = make_env()
-        self.username = username
+        self.username, self.admin_id, self.support = username, admin_id, support
+
+    def feed(self, update) -> None:
+        run(
+            self.dp.feed_update(
+                self.bot,
+                update,
+                db=self.db,
+                kaspi_info=KASPI,
+                admin_id=self.admin_id,
+                support_contact=self.support,
+            )
+        )
 
     def say(self, text: str) -> None:
-        run(
-            self.dp.feed_update(
-                self.bot, message_update(text, self.username), db=self.db, kaspi_info=KASPI
-            )
-        )
+        self.feed(message_update(text, self.username))
 
     def press(self, data: str) -> None:
-        run(
-            self.dp.feed_update(
-                self.bot, callback_update(data, self.username), db=self.db, kaspi_info=KASPI
-            )
-        )
+        self.feed(callback_update(data, self.username))
 
     def texts(self) -> list[str]:
         return [c.text for c in self.session.calls if isinstance(c, SendMessage | EditMessageText)]
@@ -212,11 +221,8 @@ def test_non_text_message_in_email_step() -> None:
     assert "обычным текстом" in chat.last_call().text and chat.state() == Application.email.state
 
 
-def test_paid_button_only_in_confirm_state() -> None:
+def test_paid_button_without_application_does_nothing_harmful() -> None:
     chat = Chat()
-    chat.press(PAID_CB)  # без заявки кнопка ничего не делает
-    assert chat.alerts() == []
-    chat.say("/start create_netflix")
-    chat.say("bob@mail.kz")
-    chat.press(PAID_CB)
-    assert chat.alerts() and "в разработке" in chat.alerts()[-1]
+    chat.press(PAID_CB)  # без заявки: просто сообщение, заявок не создаётся
+    assert "уже отправлена или отменена" in chat.alerts()[-1]
+    assert chat.db.client.tables["applications"] == []  # type: ignore[attr-defined]

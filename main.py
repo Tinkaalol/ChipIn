@@ -5,6 +5,7 @@ from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
 
+import admin
 import flow
 import handlers
 from config import get_settings
@@ -22,10 +23,17 @@ async def main() -> None:
     dp = Dispatcher()
     dp.include_router(handlers.router)
     dp.include_router(flow.router)
+    dp.include_router(admin.router)
     health = await start_health_server()
     try:
         # db и реквизиты попадают в хендлеры как аргументы по имени
-        await dp.start_polling(bot, db=db, kaspi_info=settings.kaspi_payment_info)
+        await dp.start_polling(
+            bot,
+            db=db,
+            kaspi_info=settings.kaspi_payment_info,
+            admin_id=settings.admin_id,
+            support_contact=settings.support_contact,
+        )
     finally:
         if health is not None:
             await health.cleanup()
