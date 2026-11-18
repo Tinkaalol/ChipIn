@@ -14,7 +14,7 @@ from aiogram.types import User as TgUser
 
 import dates
 from catalog import Service, get_service, money
-from db import MEMBER_ACTIVE, ROLE_OWNER, STATUS_OPEN, Database
+from db import CREATOR_EMAIL_PLACEHOLDER, MEMBER_ACTIVE, ROLE_OWNER, STATUS_OPEN, Database
 from handlers import (
     CREATE_PREFIX,
     MY_SUBS_CB,
@@ -220,10 +220,14 @@ async def save_group(
         group = await db.create_group(
             {
                 "service_slug": service.slug,
+                "service_name": service.title,
                 "creator_tg_username": creator_label(user),
+                "creator_email": CREATOR_EMAIL_PLACEHOLDER,
                 "price_per_slot": service.price_per_slot,
                 "max_slots": service.max_slots,
+                "total_slots": service.max_slots,
                 "current_slots": service.max_slots - free,
+                "occupied_slots": service.max_slots - free,
                 "billing_date": data["billing_date"],
                 "invite_link": link,
                 "members": [

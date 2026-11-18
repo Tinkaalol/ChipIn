@@ -6,8 +6,9 @@ from db import SchemaError, check_schema
 GOOD_COLUMNS = {
     c: {"type": "string"}
     for c in (
-        "id service_slug creator_tg_username price_per_slot max_slots current_slots "
-        "billing_date invite_link members status created_at"
+        "id service_slug service_name creator_tg_username creator_email price_per_slot max_slots "
+        "total_slots current_slots occupied_slots billing_date invite_link members status "
+        "created_at"
     ).split()
 }
 
@@ -18,7 +19,9 @@ def transport(definitions: dict | None, status: int = 200) -> httpx.MockTranspor
 
 
 def groups(required: list[str], drop: tuple[str, ...] = ()) -> dict:
-    props = {k: v for k, v in GOOD_COLUMNS.items() if k not in drop}
+    props = {k: dict(v) for k, v in GOOD_COLUMNS.items() if k not in drop}
+    props["id"]["default"] = "gen_random_uuid()"
+    props["total_slots"]["default"] = 4  # NOT NULL, но с default: бот заполнять не обязан
     return {"groups": {"properties": props, "required": required}}
 
 
@@ -36,8 +39,14 @@ async def test_missing_columns_are_named() -> None:
 
 
 async def test_not_null_column_the_bot_does_not_fill() -> None:
-    with pytest.raises(SchemaError, match="creator_email"):
-        await run(groups(["id", "service_slug", "creator_email"]))
+    definitions = groups(["id", "service_slug", "owner_phone"])
+    definitions["groups"]["properties"]["owner_phone"] = {"type": "string"}
+    with pytest.raises(SchemaError, match="owner_phone"):
+        await run(definitions)
+
+
+async def test_not_null_with_default_is_fine() -> None:
+    await run(groups(["id", "total_slots", "creator_email"]))
 
 
 async def test_no_table_or_bad_key() -> None:

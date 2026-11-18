@@ -18,20 +18,26 @@ ROLE_MEMBER = "member"
 
 JOIN_RETRIES = 5
 
-# Колонки, которые бот пишет и читает. Размер группы хранится в max_slots.
-GROUP_COLUMNS = {
+# Все колонки, которые бот заполняет при создании группы. Размер группы дублируется в
+# max_slots и total_slots, занятые места в current_slots и occupied_slots: сайт может читать любую.
+INSERT_COLUMNS = {
     "service_slug",
+    "service_name",
     "creator_tg_username",
+    "creator_email",
     "price_per_slot",
     "max_slots",
+    "total_slots",
     "current_slots",
+    "occupied_slots",
     "billing_date",
     "invite_link",
     "members",
     "status",
 }
-# Для INSERT бот передаёт только эти поля; остальные NOT NULL-колонки должны иметь default
-INSERT_COLUMNS = GROUP_COLUMNS
+GROUP_COLUMNS = INSERT_COLUMNS
+# Организатор email не вводит, а колонка creator_email обязательная
+CREATOR_EMAIL_PLACEHOLDER = "not_required"
 
 
 class GroupUnavailable(Exception):
@@ -64,8 +70,10 @@ async def check_schema(
         raise SchemaError(
             f"В groups нет колонок: {', '.join(sorted(missing))}. Выполните supabase_schema.sql."
         )
-    # required в OpenAPI: NOT NULL без default; такие колонки бот должен заполнять сам
-    blocked = set(table.get("required", [])) - INSERT_COLUMNS - {"id"}
+    # required в OpenAPI: NOT NULL. Бот обязан сам заполнить те из них, у которых нет default
+    properties = table.get("properties", {})
+    no_default = {c for c in table.get("required", []) if "default" not in properties.get(c, {})}
+    blocked = no_default - INSERT_COLUMNS
     if blocked:
         raise SchemaError(
             f"Колонки {', '.join(sorted(blocked))} обязательны, а бот их не заполняет. "
@@ -77,8 +85,17 @@ async def connect(url: str, key: str) -> "Database":
     return Database(await acreate_client(url, key))
 
 
+def total_slots(group: Row) -> int:
+    return int(group.get("max_slots") or group.get("total_slots") or 0)
+
+
+def occupied_slots(group: Row) -> int:
+    current = group.get("current_slots")
+    return int(current if current is not None else group.get("occupied_slots") or 0)
+
+
 def free_slots(group: Row) -> int:
-    return int(group["max_slots"]) - int(group["current_slots"])
+    return total_slots(group) - occupied_slots(group)
 
 
 def is_joinable(group: Row) -> bool:
@@ -140,15 +157,19 @@ class Database:
                 raise GroupUnavailable
             if has_member(group, member["tg_id"]):
                 raise AlreadyMember
-            taken = int(group["current_slots"]) + 1
-            values: Row = {"members": [*members_of(group), member], "current_slots": taken}
-            if taken >= int(group["max_slots"]):
+            taken = occupied_slots(group) + 1
+            values: Row = {
+                "members": [*members_of(group), member],
+                "current_slots": taken,
+                "occupied_slots": taken,
+            }
+            if taken >= total_slots(group):
                 values["status"] = STATUS_FULL
             response = await (
                 self.client.table("groups")
                 .update(values)
                 .eq("id", group_id)
-                .eq("current_slots", group["current_slots"])
+                .eq("current_slots", group["current_slots"])  # условие против гонки
                 .eq("status", STATUS_OPEN)
                 .execute()
             )

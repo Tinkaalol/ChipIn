@@ -1,3 +1,4 @@
+from db import INSERT_COLUMNS
 from tests.fakes import Chat_, buttons
 
 
@@ -32,8 +33,10 @@ def test_full_flow_saves_group_with_fixed_price() -> None:
     chat.say("https://ya.plus/invite/xyz")
     row = chat.groups[-1]
     assert row["service_slug"] == "yandex_plus" and row["creator_tg_username"] == "@bob"
-    assert row["price_per_slot"] == 850 and row["max_slots"] == 4
-    assert row["current_slots"] == 2  # 4 места, 2 свободны: заняты организатор и ещё один
+    assert row["price_per_slot"] == 850 and row["max_slots"] == 4 and row["total_slots"] == 4
+    assert row["current_slots"] == row["occupied_slots"] == 2  # заняты организатор и ещё один
+    assert row["service_name"] == "Яндекс Плюс" and row["creator_email"] == "not_required"
+    assert set(row) - {"id"} == INSERT_COLUMNS  # заполнены все колонки, ни одной лишней
     assert (
         row["billing_date"] == "2026-12-05" and row["invite_link"] == "https://ya.plus/invite/xyz"
     )

@@ -1,13 +1,13 @@
 -- Доработка таблицы groups под бота. Выполните один раз: Supabase -> SQL Editor -> New query -> Run.
--- Скрипт можно запускать повторно.
+-- Скрипт можно запускать повторно: уже существующие колонки не трогаются.
 
-alter table public.groups add column if not exists price_per_slot int;
+alter table public.groups add column if not exists service_name text;
+alter table public.groups add column if not exists price_per_slot int not null default 0;
+alter table public.groups add column if not exists total_slots int not null default 4;
+alter table public.groups add column if not exists occupied_slots int not null default 1;
 alter table public.groups add column if not exists billing_date date;
 alter table public.groups add column if not exists invite_link text;
 alter table public.groups add column if not exists members jsonb not null default '[]'::jsonb;
-
--- Email организатора бот больше не спрашивает
-alter table public.groups alter column creator_email drop not null;
 
 -- Новые группы создаются со статусом open (раньше было collecting)
 alter table public.groups alter column status set default 'open';

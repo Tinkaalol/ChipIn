@@ -38,7 +38,7 @@ def test_join_adds_active_member_and_takes_a_slot() -> None:
     chat.say(f"/start join_{G1}")
     chat.say("Bob@Mail.kz")
     group = chat.group(G1)
-    assert group["current_slots"] == 2 and group["status"] == "open"
+    assert group["current_slots"] == group["occupied_slots"] == 2 and group["status"] == "open"
     assert len(group["members"]) == 2
     member = group["members"][-1]
     assert member["tg_id"] == 7 and member["tg_username"] == "@bob"
